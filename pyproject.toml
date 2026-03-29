@@ -1,0 +1,39 @@
+[project]
+name = "underfit"
+version = "0.1.0"
+description = "Python SDK for the Underfit model reporter"
+authors = [{ name = "Mitchell Goff" }]
+requires-python = ">=3.9"
+
+readme = "README.md"
+classifiers = ["Programming Language :: Python :: 3"]
+license = "MIT"
+license-files = ["LICENSE"]
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+dependencies = []
+
+[project.optional-dependencies]
+view = ["underfit-api"]
+testing = [
+    "ruff",
+    "ty",
+    "pytest",
+]
+
+[tool.setuptools.package-data]
+"underfit" = ["py.typed"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+lint.pyupgrade.keep-runtime-typing = true
+
+lint.select = ["ALL"]
+lint.ignore = [
+    "ARG", "ASYNC", "BLE", "C", "D", "EM", "ERA", "FBT", "PERF", "PLR", "Q", "RET", "RUF", "TC", "TD", "TRY",
+    "ANN401", "COM812", "E701", "FIX002", "N802", "PT018", "S101",
+]
