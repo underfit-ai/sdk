@@ -17,7 +17,6 @@ build-backend = "setuptools.build_meta"
 dependencies = []
 
 [project.optional-dependencies]
-view = ["underfit-api"]
 testing = [
     "ruff",
     "ty",
