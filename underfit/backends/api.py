@@ -26,6 +26,24 @@ def _normalize_api_url(url: str) -> str:
     return f"{normalized}/api/v1"
 
 
+def resolve_account_handle(api_url: str, api_key: str) -> str:
+    request = urllib.request.Request(  # noqa: S310
+        url=f"{_normalize_api_url(api_url)}/me", method="GET", headers={"Authorization": f"Bearer {api_key}"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Failed to resolve current user from Underfit API: {e.code}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Failed to resolve current user from Underfit API: {e.reason}") from e
+
+    handle = body.get("handle")
+    if not isinstance(handle, str) or not handle:
+        raise RuntimeError("Underfit /me response missing handle")
+    return handle
+
+
 class APIBackend(Backend):
     """Send run data to the remote Underfit API."""
 
