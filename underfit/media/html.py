@@ -41,7 +41,6 @@ class Html:
 
         if isinstance(data_or_path, Path):
             path = data_or_path
-            self._validate_path(path)
         elif isinstance(data_or_path, str):
             html = data_or_path
         elif isinstance(data_or_path, (bytes, bytearray, memoryview)):

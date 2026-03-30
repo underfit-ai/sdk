@@ -43,7 +43,7 @@ class Video:
         data_or_path: PathLikeOrBytes,
         *,
         caption: str | None = None,
-        fps: int = 24,
+        fps: int = 4,
         file_type: str | None = None,
     ) -> None:
         if not isinstance(fps, int) or fps <= 0:
@@ -54,11 +54,8 @@ class Video:
 
         if isinstance(data_or_path, (str, Path)):
             path = Path(data_or_path)
-            self._validate_path(path, "video")
         elif isinstance(data_or_path, (bytes, bytearray, memoryview)):
             data = bytes(data_or_path)
-            if file_type is None:
-                raise ValueError("file_type is required when providing raw bytes")
         else:
             raise TypeError("data_or_path must be a path string, Path, or bytes-like object")
 
