@@ -23,6 +23,10 @@ class Backend(ABC):
         """Append console log lines for a run."""
 
     @abstractmethod
+    def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
+        """Append media files for a run under a shared key and step."""
+
+    @abstractmethod
     def upload_artifact_entry(self, artifact_name: str, entry: dict[str, Any]) -> None:
         """Store an artifact entry for a run."""
 

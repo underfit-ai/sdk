@@ -15,6 +15,7 @@ _ARTIFACT_FILE_NAME = "artifacts.jsonl"
 _LOG_FILE_NAME = "logs.jsonl"
 _META_FILE_NAME = "run.json"
 _SCALAR_FILE_NAME = "scalars.jsonl"
+_MEDIA_FILE_NAME = "media.jsonl"
 
 
 def _now_iso() -> str:
@@ -47,9 +48,11 @@ class LocalBackend(Backend):
         self.root_dir = Path(root_dir or Path.cwd() / "underfit")
         self.run_dir = self.root_dir / _slug(project_name or "default") / self.run_name
         self.artifact_dir = self.run_dir / "artifacts"
+        self.media_dir = self.run_dir / "media"
 
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
+        self.media_dir.mkdir(parents=True, exist_ok=True)
         self._write_metadata({
             "mode": "offline",
             "project": project_name,
@@ -102,6 +105,34 @@ class LocalBackend(Backend):
         metadata["finishedAt"] = _now_iso()
         self._write_metadata(metadata)
 
+    def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
+        if not payloads:
+            return
+
+        media_id = _slug(key) + "-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        destination_root = self.media_dir / media_id
+        destination_root.mkdir(parents=True, exist_ok=True)
+
+        stored_files: list[str] = []
+        for idx, payload in enumerate(payloads):
+            filename, content = self._extract_media_content(payload, key, idx)
+            dest = destination_root / str(idx)
+            dest.write_bytes(content)
+            stored_files.append(str(dest))
+
+        excluded = {"_type", "path", "data", "html"}
+        metadata: dict[str, Any] = {k: v for k, v in payloads[0].items() if k not in excluded and v is not None}
+        record = {
+            "id": media_id,
+            "key": key,
+            "step": step,
+            "type": payloads[0].get("_type"),
+            "files": stored_files,
+            "metadata": metadata or None,
+            "createdAt": _now_iso(),
+        }
+        self._append_jsonl(self.run_dir / _MEDIA_FILE_NAME, record)
+
     def _store_artifact_entry(self, artifact_name: str, entry: dict[str, Any]) -> dict[str, Any]:
         destination_root = self.artifact_dir / _slug(artifact_name)
         destination_root.mkdir(parents=True, exist_ok=True)
@@ -143,6 +174,18 @@ class LocalBackend(Backend):
         destination = destination.with_suffix(".json")
         destination.write_text(json.dumps(entry, sort_keys=True), encoding="utf-8")
         return {"kind": kind, "name": name, "path": str(destination)}
+
+    @staticmethod
+    def _extract_media_content(payload: dict[str, Any], key: str, index: int) -> tuple[str, bytes]:
+        if "path" in payload and payload["path"] is not None:
+            path = Path(payload["path"])
+            return path.name, path.read_bytes()
+        if "data" in payload and payload["data"] is not None:
+            filename = f"{key}-{index}.{payload.get('file_type') or 'bin'}"
+            return filename, base64.b64decode(payload["data"])
+        if "html" in payload and payload["html"] is not None:
+            return f"{key}-{index}.html", str(payload["html"]).encode("utf-8")
+        raise RuntimeError("media payload is missing content")
 
     def _append_jsonl(self, path: Path, record: dict[str, Any]) -> None:
         with path.open("a", encoding="utf-8") as handle:
