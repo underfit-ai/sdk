@@ -40,7 +40,7 @@ class LocalBackend(Backend):
         project_name: str,
         run_name: str | None,
         run_config: dict[str, Any],
-        root_dir: Path | str | None = None,
+        root_dir: str | Path | None = None,
     ) -> None:
         self.project_name = project_name
         self._run_name = _slug(run_name) if run_name else _default_run_name()
@@ -56,7 +56,7 @@ class LocalBackend(Backend):
             "name": self.run_name,
             "status": "running",
             "config": run_config,
-            "createdAt": _now_iso()
+            "createdAt": _now_iso(),
         })
 
     @property
@@ -153,13 +153,12 @@ class LocalBackend(Backend):
         if not path.exists():
             return []
         with path.open("r", encoding="utf-8") as handle:
-            return [json.loads(line) for line in (raw_line.strip() for raw_line in handle) if line]
+            lines = [line.strip() for line in handle]
+            return [json.loads(line) for line in lines if line]
 
     def _read_metadata(self) -> dict[str, Any]:
         path = self.run_dir / _META_FILE_NAME
-        if not path.exists():
-            return {}
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
     def _write_metadata(self, payload: dict[str, Any]) -> None:
         path = self.run_dir / _META_FILE_NAME

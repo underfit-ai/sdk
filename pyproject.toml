@@ -29,7 +29,6 @@ testing = [
 [tool.ruff]
 line-length = 120
 target-version = "py39"
-lint.pyupgrade.keep-runtime-typing = true
 
 lint.select = ["ALL"]
 lint.ignore = [

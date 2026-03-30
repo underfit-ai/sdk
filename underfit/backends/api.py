@@ -39,8 +39,8 @@ class APIBackend(Backend):
         self.api_key = api_key
         self.account_handle = account_handle.lower()
         self.project_name = project_name.lower()
-        self._run_name = run_name.lower() if run_name else None
         self.scalar_line = 0
+        self._run_name = run_name.lower() if run_name else None
         self._log_line_offsets: dict[str, int] = {"stdout": 0, "stderr": 0}
         self._create_run(run_config)
 
