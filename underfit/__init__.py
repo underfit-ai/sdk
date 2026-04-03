@@ -67,7 +67,7 @@ def init(
             run_config=resolved_config,
         )
 
-    run = Run(project=project, name=backend.run_name, config=resolved_config, _backend=backend)
+    run = Run(project=project, name=backend.run_name, backend=backend, config=resolved_config)
     return run
 
 

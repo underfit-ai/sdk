@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Union
 
@@ -14,26 +13,26 @@ PathLike = Union[str, Path]
 PathOrBytes = Union[str, Path, bytes, bytearray, memoryview]
 
 
-@dataclass
 class Run:
     """Represent an Underfit run.
 
     Args:
         project: Project name.
         name: Run name.
+        backend: Backend used to store run data.
         config: Run configuration dictionary.
     """
 
-    project: str | None = None
-    name: str | None = None
-    config: dict[str, Any] = field(default_factory=dict)
-    summary: dict[str, Any] = field(default_factory=dict)
-    _backend: Backend | None = field(default=None, repr=False)
+    def __init__(self, project: str, name: str, backend: Backend, config: dict[str, Any] | None = None) -> None:
+        self.project = project
+        self.name = name
+        self.backend = backend
+        self.config = {} if config is None else dict(config)
+        self._finished = False
 
-    @property
-    def backend(self) -> Backend | None:
-        """Return the configured storage backend for this run."""
-        return self._backend
+    def _require_active(self) -> None:
+        if self._finished:
+            raise RuntimeError("run is already finished")
 
     def log(self, data: dict[str, Any], step: int | None = None) -> None:
         """Record metrics and media for the run.
@@ -44,11 +43,18 @@ class Run:
         Args:
             data: Mapping of metric names to values or media objects.
             step: Optional global step.
+
+        Raises:
+            RuntimeError: If the run has already been finished.
+            TypeError: If a logged value is boolean.
         """
+        self._require_active()
         scalar_values: dict[str, float] = {}
         media_batches: list[tuple[str, list[Any]]] = []
 
         for key, value in data.items():
+            if isinstance(value, bool):
+                raise TypeError(f"Boolean values are not supported for underfit.Run.log: {key}")
             if isinstance(value, (int, float)):
                 scalar_values[key] = float(value)
             elif isinstance(value, (Html, Image, Video, Audio)):
@@ -61,15 +67,10 @@ class Run:
                 continue
 
         if scalar_values:
-            self.summary.update(scalar_values)
-        if self._backend is None:
-            return
-
-        if scalar_values:
-            self._backend.log_scalars(scalar_values, step)
+            self.backend.log_scalars(scalar_values, step)
         for key, media_list in media_batches:
             payloads = [media.to_payload() for media in media_list]
-            self._backend.log_media(key, step, payloads)
+            self.backend.log_media(key, step, payloads)
 
     def log_code(
         self,
@@ -84,16 +85,20 @@ class Run:
         Args:
             root_path: Root directory to scan. Defaults to the current working directory.
             name: Optional artifact name.
-            include: Optional whitelist callable. Return True to include a file.
-            exclude: Optional blacklist callable. Return True to exclude a file.
+            include: Optional whitelist callable. It receives each resolved
+                absolute file path and returns True to include it.
+            exclude: Optional blacklist callable. It receives each resolved
+                absolute file path and returns True to exclude it.
 
         Returns:
             Artifact containing matched files from the root path.
 
         Raises:
             FileNotFoundError: If ``root_path`` does not exist.
+            RuntimeError: If the run has already been finished.
             ValueError: If ``root_path`` is not a directory.
         """
+        self._require_active()
         root = Path.cwd() if root_path is None else Path(root_path)
         if not root.exists():
             raise FileNotFoundError(f"root_path does not exist: {root}")
@@ -106,11 +111,8 @@ class Run:
         paths = sorted((path for path in resolved_root.rglob("*") if path.is_file()), key=lambda path: path.as_posix())
 
         for path in paths:
-            if not include_match(path):
-                continue
-            if exclude is not None and exclude(path):
-                continue
-            artifact.add_file(path, name=path.relative_to(resolved_root).as_posix())
+            if include_match(path) and (exclude is None or not exclude(path)):
+                artifact.add_file(path, name=path.relative_to(resolved_root).as_posix())
 
         self.log_artifact(artifact)
         return artifact
@@ -127,9 +129,11 @@ class Run:
 
         Raises:
             FileNotFoundError: If a path checkpoint does not exist.
+            RuntimeError: If the run has already been finished.
             TypeError: If ``checkpoint`` is not path-like or bytes-like.
             ValueError: If a path checkpoint is neither a file nor directory.
         """
+        self._require_active()
         artifact = Artifact(name or "model-checkpoint", "model")
         if isinstance(checkpoint, (bytes, bytearray, memoryview)):
             artifact.add_bytes(checkpoint, name="checkpoint.bin")
@@ -156,35 +160,31 @@ class Run:
             artifact: Artifact to upload.
 
         Raises:
+            RuntimeError: If the run has already been finished.
             TypeError: If ``artifact`` is not an ``underfit.Artifact``.
         """
+        self._require_active()
         if not isinstance(artifact, Artifact):
             raise TypeError("artifact must be an underfit.Artifact")
-        if self._backend is None:
-            return
 
         for entry in artifact.upload_manifest():
-            self._backend.upload_artifact_entry(artifact.name, entry)
+            self.backend.upload_artifact_entry(artifact.name, entry)
 
     def finish(self) -> None:
         """Finalize the run."""
-        if self._backend is not None:
-            self._backend.finish()
+        if self._finished:
+            return
+        self.backend.finish()
+        self._finished = True
 
     def read_scalars(self) -> list[dict[str, Any]]:
         """Return scalar records available from the active backend."""
-        if self._backend is None:
-            return []
-        return self._backend.read_scalars()
+        return self.backend.read_scalars()
 
     def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
         """Return log records available from the active backend."""
-        if self._backend is None:
-            return []
-        return self._backend.read_logs(worker_id)
+        return self.backend.read_logs(worker_id)
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
         """Return artifact entries available from the active backend."""
-        if self._backend is None:
-            return []
-        return self._backend.read_artifact_entries(artifact_name)
+        return self.backend.read_artifact_entries(artifact_name)
