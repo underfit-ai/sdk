@@ -35,7 +35,6 @@ class _InterceptedStream:
 @contextmanager
 def capture(write_callback: Callable[[str, str], None]) -> Iterator[None]:
     """Capture stdout and stderr writes with a callback."""
-
     orig_stdout = sys.stdout
     orig_stderr = sys.stderr
     sys.stdout = _InterceptedStream(sys.stdout, lambda data: write_callback("stdout", data))

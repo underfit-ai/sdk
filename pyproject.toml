@@ -32,6 +32,7 @@ target-version = "py39"
 
 lint.select = ["ALL"]
 lint.ignore = [
-    "ARG", "ASYNC", "BLE", "C", "D", "EM", "ERA", "FBT", "PERF", "PLR", "Q", "RET", "RUF", "TC", "TD", "TRY",
-    "ANN401", "COM812", "E701", "FIX002", "N802", "PT018", "S101",
+    "ARG", "ASYNC", "BLE", "C", "EM", "ERA", "FBT", "PERF", "PLR", "Q", "RET", "RUF", "TC", "TD", "TRY",
+    "ANN401", "COM812", "D102", "D107", "D413", "E701", "FIX002", "N802", "PT018", "S101",
 ]
+lint.pydocstyle.convention = "google"

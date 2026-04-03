@@ -73,7 +73,6 @@ class Video:
         Returns:
             Dictionary with stable keys used by future uploader integrations.
         """
-
         payload: dict[str, Any] = {
             "_type": "video",
             "caption": self.caption,

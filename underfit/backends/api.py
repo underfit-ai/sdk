@@ -26,24 +26,6 @@ def _normalize_api_url(url: str) -> str:
     return f"{normalized}/api/v1"
 
 
-def resolve_account_handle(api_url: str, api_key: str) -> str:
-    request = urllib.request.Request(  # noqa: S310
-        url=f"{_normalize_api_url(api_url)}/me", method="GET", headers={"Authorization": f"Bearer {api_key}"}
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
-            body = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"Failed to resolve current user from Underfit API: {e.code}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Failed to resolve current user from Underfit API: {e.reason}") from e
-
-    handle = body.get("handle")
-    if not isinstance(handle, str) or not handle:
-        raise RuntimeError("Underfit /me response missing handle")
-    return handle
-
-
 class APIBackend(Backend):
     """Send run data to the remote Underfit API."""
 
@@ -52,14 +34,13 @@ class APIBackend(Backend):
         *,
         api_url: str,
         api_key: str,
-        account_handle: str,
         project_name: str,
         run_name: str | None,
         run_config: dict[str, Any],
     ) -> None:
         self.api_url = _normalize_api_url(api_url)
         self.api_key = api_key
-        self.account_handle = account_handle.lower()
+        self.account_handle = self._resolve_account_handle()
         self.project_name = project_name.lower()
         self.scalar_line = 0
         self._run_name = run_name.lower() if run_name else None
@@ -168,6 +149,13 @@ class APIBackend(Backend):
 
         body = b"".join(parts)
         return body, boundary
+
+    def _resolve_account_handle(self) -> str:
+        response = self._request("GET", "/me")
+        handle = response.get("handle")
+        if not isinstance(handle, str) or not handle:
+            raise RuntimeError("Underfit /me response missing handle")
+        return handle.lower()
 
     def _base_run_path(self) -> str:
         return f"/accounts/{self.account_handle}/projects/{self.project_name}/runs/{self.run_name}"

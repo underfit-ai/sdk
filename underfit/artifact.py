@@ -76,7 +76,6 @@ class Artifact:
             TypeError: If ``local_path`` is not path-like.
             ValueError: If ``local_path`` is not a file or the name is invalid.
         """
-
         path = self._coerce_existing_path(local_path)
         if not path.is_file():
             raise ValueError(f"local_path must point to a file: {path}")
@@ -100,7 +99,6 @@ class Artifact:
             TypeError: If ``local_path`` is not path-like.
             ValueError: If ``local_path`` is not a directory or the name is invalid.
         """
-
         path = self._coerce_existing_path(local_path)
         if not path.is_dir():
             raise ValueError(f"local_path must point to a directory: {path}")
@@ -123,7 +121,6 @@ class Artifact:
             TypeError: If ``obj`` is not a supported media object.
             ValueError: If the entry name is invalid.
         """
-
         if not isinstance(obj, (Html, Image, Video, Audio)):
             raise TypeError(
                 "obj must be an underfit.media.Html, underfit.media.Image, "
@@ -151,7 +148,6 @@ class Artifact:
             TypeError: If ``data`` is not bytes-like.
             ValueError: If the entry name is invalid.
         """
-
         if not isinstance(data, (bytes, bytearray, memoryview)):
             raise TypeError("data must be bytes-like")
 
@@ -174,7 +170,6 @@ class Artifact:
             TypeError: If ``url`` is not a string.
             ValueError: If the URL or name is invalid.
         """
-
         if not isinstance(url, str):
             raise TypeError("url must be a string")
         parsed = urlparse(url)
@@ -189,12 +184,10 @@ class Artifact:
 
     def upload_manifest(self) -> list[dict[str, Any]]:
         """Return entries that should be uploaded by the backend uploader."""
-
         return copy.deepcopy(self._upload_entries)
 
     def to_payload(self) -> dict[str, Any]:
         """Return a serializable artifact payload."""
-
         payload: dict[str, Any] = {
             "_type": "artifact",
             "name": self.name,

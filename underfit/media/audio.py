@@ -68,7 +68,6 @@ class Audio:
 
     def to_payload(self) -> dict[str, Any]:
         """Return a transport-ready dictionary for this audio payload."""
-
         payload: dict[str, Any] = {
             "_type": "audio",
             "caption": self.caption,

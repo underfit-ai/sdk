@@ -77,7 +77,6 @@ class Image:
         Returns:
             Dictionary with stable keys used by future uploader integrations.
         """
-
         payload: dict[str, Any] = {
             "_type": "image",
             "caption": self.caption,

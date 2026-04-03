@@ -62,7 +62,6 @@ class Html:
         Returns:
             Dictionary with stable keys used by future uploader integrations.
         """
-
         payload: dict[str, Any] = {"_type": "html", "caption": self.caption, "inject": self.inject}
 
         if self.path is not None:

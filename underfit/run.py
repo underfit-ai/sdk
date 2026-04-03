@@ -33,7 +33,6 @@ class Run:
     @property
     def backend(self) -> Backend | None:
         """Return the configured storage backend for this run."""
-
         return self._backend
 
     def log(self, data: dict[str, Any], step: int | None = None) -> None:
@@ -46,7 +45,6 @@ class Run:
             data: Mapping of metric names to values or media objects.
             step: Optional global step.
         """
-
         scalar_values: dict[str, float] = {}
         media_batches: list[tuple[str, list[Any]]] = []
 
@@ -96,7 +94,6 @@ class Run:
             FileNotFoundError: If ``root_path`` does not exist.
             ValueError: If ``root_path`` is not a directory.
         """
-
         root = Path.cwd() if root_path is None else Path(root_path)
         if not root.exists():
             raise FileNotFoundError(f"root_path does not exist: {root}")
@@ -133,7 +130,6 @@ class Run:
             TypeError: If ``checkpoint`` is not path-like or bytes-like.
             ValueError: If a path checkpoint is neither a file nor directory.
         """
-
         artifact = Artifact(name or "model-checkpoint", "model")
         if isinstance(checkpoint, (bytes, bytearray, memoryview)):
             artifact.add_bytes(checkpoint, name="checkpoint.bin")
@@ -162,7 +158,6 @@ class Run:
         Raises:
             TypeError: If ``artifact`` is not an ``underfit.Artifact``.
         """
-
         if not isinstance(artifact, Artifact):
             raise TypeError("artifact must be an underfit.Artifact")
         if self._backend is None:
@@ -173,27 +168,23 @@ class Run:
 
     def finish(self) -> None:
         """Finalize the run."""
-
         if self._backend is not None:
             self._backend.finish()
 
     def read_scalars(self) -> list[dict[str, Any]]:
         """Return scalar records available from the active backend."""
-
         if self._backend is None:
             return []
         return self._backend.read_scalars()
 
     def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
         """Return log records available from the active backend."""
-
         if self._backend is None:
             return []
         return self._backend.read_logs(worker_id)
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
         """Return artifact entries available from the active backend."""
-
         if self._backend is None:
             return []
         return self._backend.read_artifact_entries(artifact_name)

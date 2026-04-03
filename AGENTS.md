@@ -15,6 +15,7 @@ Underfit is an open-source model reporting dashboard for tracking experiments, m
 
 - Treat docstrings as a primary API contract for generated docs.
 - Prefer Google-style docstrings for public modules, classes, methods, and functions.
+- Follow PEP 257 spacing: no blank line after function or method docstrings, and keep a blank line after class docstrings.
 - Keep private/internal helpers undocumented unless behavior is non-obvious.
 - Write a concise one-line summary first, then optional detail paragraphs.
 - Use imperative tone in summaries (for example: "Initialize a new run.").
