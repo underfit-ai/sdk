@@ -14,16 +14,17 @@ PathOrBytes = Union[str, Path, bytes, bytearray, memoryview]
 
 
 class Run:
-    """Represent an Underfit run.
-
-    Args:
-        project: Project name.
-        name: Run name.
-        backend: Backend used to store run data.
-        config: Run configuration dictionary.
-    """
+    """Represent an Underfit run."""
 
     def __init__(self, project: str, name: str, backend: Backend, config: dict[str, Any] | None = None) -> None:
+        """Initialize a run.
+
+        Args:
+            project: Project name.
+            name: Run name.
+            backend: Backend used to store run data.
+            config: Run configuration dictionary.
+        """
         self.project = project
         self.name = name
         self.backend = backend
