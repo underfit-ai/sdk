@@ -5,17 +5,25 @@ from __future__ import annotations
 import base64
 import os
 import urllib.error
+from dataclasses import asdict
 from email.message import Message
 from pathlib import Path
 
 import pytest
 
-from underfit.artifact import Artifact
+from underfit.artifact import (
+    Artifact,
+    ArtifactCreate,
+    ArtifactDataUpload,
+    ArtifactManifest,
+    ArtifactPathUpload,
+    ArtifactReference,
+)
 from underfit.media import Html
 
 
-def test_artifact_builds_create_payload_uploads_and_manifest(tmp_path: Path) -> None:
-    """Collect files first and emit the final manifest separately."""
+def test_artifact_builds_create_request_uploads_and_manifest(tmp_path: Path) -> None:
+    """Collect typed artifact data before backend serialization."""
     metrics = tmp_path / "metrics.json"
     metrics.write_text('{"loss": 0.1}\n')
     model_card = tmp_path / "model-card.txt"
@@ -33,23 +41,22 @@ def test_artifact_builds_create_payload_uploads_and_manifest(tmp_path: Path) -> 
     artifact.add_bytes(b"weights", name="weights.bin")
     artifact.add_url(model_card.as_uri())
 
-    assert artifact.create_payload() == {"name": "checkpoint", "type": "model", "metadata": {"tag": "best"}}
-    assert artifact.upload_files() == [
-        {"path": "reports/metrics.json", "source_path": str(metrics)},
-        {"path": "files/a.txt", "source_path": str(bundle / "a.txt")},
-        {"path": "files/nested/b.txt", "source_path": str(bundle / "nested" / "b.txt")},
-        {"path": "weights.bin", "data": base64.b64encode(b"weights").decode("ascii")},
+    assert artifact.create_request() == ArtifactCreate(name="checkpoint", type="model", metadata={"tag": "best"})
+    assert artifact.uploads() == [
+        ArtifactPathUpload(path="reports/metrics.json", source_path=str(metrics)),
+        ArtifactPathUpload(path="files/a.txt", source_path=str(bundle / "a.txt")),
+        ArtifactPathUpload(path="files/nested/b.txt", source_path=str(bundle / "nested" / "b.txt")),
+        ArtifactDataUpload(path="weights.bin", data=base64.b64encode(b"weights").decode("ascii")),
     ]
-    assert artifact.finalize_manifest() == {
-        "files": ["reports/metrics.json", "files/a.txt", "files/nested/b.txt", "weights.bin"],
-        "references": [{
-            "url": model_card.as_uri(),
-            "size": 6,
-            "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
-            "etag": None,
-            "last_modified": "Wed, 21 Oct 2015 07:28:00 GMT",
-        }],
-    }
+    assert artifact.manifest() == ArtifactManifest(
+        files=["reports/metrics.json", "files/a.txt", "files/nested/b.txt", "weights.bin"],
+        references=[ArtifactReference(
+            url=model_card.as_uri(),
+            size=6,
+            sha256="5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+            last_modified="Wed, 21 Oct 2015 07:28:00 GMT",
+        )],
+    )
 
 
 def test_artifact_add_media_uses_uploadable_file_content() -> None:
@@ -59,27 +66,22 @@ def test_artifact_add_media_uses_uploadable_file_content() -> None:
     path = artifact.add_media(Html("<h1>ok</h1>"))
 
     assert path == "media-1.html"
-    assert artifact.upload_files() == [{
-        "path": "media-1.html",
-        "data": base64.b64encode(b"<h1>ok</h1>").decode("ascii"),
-    }]
-    assert artifact.finalize_manifest() == {"files": ["media-1.html"], "references": []}
+    assert artifact.uploads() == [
+        ArtifactDataUpload(path="media-1.html", data=base64.b64encode(b"<h1>ok</h1>").decode("ascii")),
+    ]
+    assert artifact.manifest() == ArtifactManifest(files=["media-1.html"], references=[])
 
 
-def test_artifact_upload_manifest_and_payload_include_files_and_manifest() -> None:
-    """Expose upload files and manifest through public helper methods."""
+def test_artifact_dataclasses_serialize_with_asdict() -> None:
+    """Serialize typed artifact data only at the backend boundary."""
     artifact = Artifact("report", "report", metadata={"tag": "latest"})
     artifact.add_bytes(b"ok", name="report.txt")
 
-    assert artifact.upload_manifest() == artifact.upload_files()
-    assert artifact.to_payload() == {
-        "_type": "artifact",
-        "name": "report",
-        "artifact_type": "report",
-        "metadata": {"tag": "latest"},
-        "files": [{"path": "report.txt", "data": base64.b64encode(b"ok").decode("ascii")}],
-        "manifest": {"files": ["report.txt"], "references": []},
-    }
+    assert asdict(artifact.create_request()) == {"name": "report", "type": "report", "metadata": {"tag": "latest"}}
+    assert [asdict(upload) for upload in artifact.uploads()] == [
+        {"path": "report.txt", "data": base64.b64encode(b"ok").decode("ascii")},
+    ]
+    assert asdict(artifact.manifest()) == {"files": ["report.txt"], "references": []}
 
 
 def test_artifact_rejects_invalid_and_conflicting_paths() -> None:
@@ -130,7 +132,7 @@ def test_artifact_add_url_uses_head_metadata(monkeypatch: pytest.MonkeyPatch) ->
     artifact = Artifact("report", "report")
     artifact.add_url("https://example.com/model")
 
-    assert artifact.finalize_manifest()["references"] == [{
+    assert asdict(artifact.manifest())["references"] == [{
         "url": "https://example.com/model",
         "size": 7,
         "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
@@ -152,7 +154,7 @@ def test_artifact_add_url_leaves_missing_headers_blank(monkeypatch: pytest.Monke
     artifact = Artifact("report", "report")
     artifact.add_url("https://example.com/model")
 
-    assert artifact.finalize_manifest()["references"] == [{
+    assert asdict(artifact.manifest())["references"] == [{
         "url": "https://example.com/model",
         "size": None,
         "sha256": None,

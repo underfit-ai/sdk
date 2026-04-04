@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import base64
 import binascii
-import copy
 import hashlib
 import unicodedata
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
+from dataclasses import dataclass
 from email.message import Message
 from email.utils import formatdate
 from pathlib import Path
@@ -23,6 +23,53 @@ BytesLike = Union[bytes, bytearray, memoryview]
 MediaObject = Union[Html, Image, Video, Audio]
 MAX_PATH_BYTES = 1024
 MAX_PATH_SEGMENT_BYTES = 255
+
+
+@dataclass(frozen=True)
+class ArtifactCreate:
+    """Represent the payload used to create an artifact."""
+
+    name: str
+    type: str  # noqa: A003
+    metadata: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class ArtifactPathUpload:
+    """Represent a queued file upload sourced from a local file."""
+
+    path: str
+    source_path: str
+
+
+@dataclass(frozen=True)
+class ArtifactDataUpload:
+    """Represent a queued file upload sourced from in-memory data."""
+
+    path: str
+    data: str
+
+
+ArtifactUpload = Union[ArtifactPathUpload, ArtifactDataUpload]
+
+
+@dataclass(frozen=True)
+class ArtifactReference:
+    """Represent an external artifact reference."""
+
+    url: str
+    size: int | None = None
+    sha256: str | None = None
+    etag: str | None = None
+    last_modified: str | None = None
+
+
+@dataclass(frozen=True)
+class ArtifactManifest:
+    """Represent the finalized artifact manifest."""
+
+    files: list[str]
+    references: list[ArtifactReference]
 
 
 class Artifact:
@@ -67,8 +114,8 @@ class Artifact:
         self.name = name
         self.type = type
         self.metadata = dict(metadata or {})
-        self._upload_files: list[dict[str, Any]] = []
-        self._references: list[dict[str, Any]] = []
+        self._upload_files: list[ArtifactUpload] = []
+        self._references: list[ArtifactReference] = []
         self._used_paths: set[str] = set()
         self._next_media_index = 1
 
@@ -92,7 +139,7 @@ class Artifact:
             raise ValueError(f"local_path must point to a file: {path}")
 
         artifact_path = self._resolve_artifact_path(path.name, name)
-        self._upload_files.append({"path": artifact_path, "source_path": str(path)})
+        self._upload_files.append(ArtifactPathUpload(path=artifact_path, source_path=str(path)))
         return artifact_path
 
     def add_dir(self, local_path: PathLike, *, name: str | None = None) -> str:
@@ -117,9 +164,9 @@ class Artifact:
         artifact_path = self._normalize_artifact_path(path.name if name is None else name)
         files = sorted((child for child in path.rglob("*") if child.is_file()), key=lambda child: child.as_posix())
         for child in files:
-            child_path = self._join_artifact_path(artifact_path, child.relative_to(path).as_posix())
+            child_path = self._normalize_artifact_path(f"{artifact_path}/{child.relative_to(path).as_posix()}")
             self._reserve_artifact_path(child_path)
-            self._upload_files.append({"path": child_path, "source_path": str(child)})
+            self._upload_files.append(ArtifactPathUpload(path=child_path, source_path=str(child)))
         return artifact_path
 
     def add_media(self, obj: MediaObject, *, name: str | None = None) -> str:
@@ -169,7 +216,7 @@ class Artifact:
 
         artifact_path = self._resolve_artifact_path("checkpoint.bin", name)
         encoded = base64.b64encode(bytes(data)).decode("ascii")
-        self._upload_files.append({"path": artifact_path, "data": encoded})
+        self._upload_files.append(ArtifactDataUpload(path=artifact_path, data=encoded))
         return artifact_path
 
     def add_url(self, url: str) -> None:
@@ -192,37 +239,26 @@ class Artifact:
         parsed = urlparse(url)
         if not parsed.scheme:
             raise ValueError("url must include a scheme")
+        scheme = parsed.scheme.lower()
+        if scheme == "file":
+            self._references.append(self._file_reference(url, parsed))
+        elif scheme in {"http", "https"}:
+            self._references.append(self._http_reference(url))
+        else:
+            self._references.append(ArtifactReference(url=url))
 
-        metadata = self._reference_metadata(url, parsed)
-        self._references.append({"url": url, **metadata})
+    def create_request(self) -> ArtifactCreate:
+        """Return the typed payload used to create the artifact."""
+        return ArtifactCreate(name=self.name, type=self.type, metadata=self.metadata or None)
 
-    def create_payload(self) -> dict[str, Any]:
-        """Return the payload used to create the artifact."""
-        return {"name": self.name, "type": self.type, "metadata": copy.deepcopy(self.metadata) or None}
-
-    def upload_files(self) -> list[dict[str, Any]]:
+    def uploads(self) -> list[ArtifactUpload]:
         """Return files that should be uploaded before finalizing the artifact."""
-        return copy.deepcopy(self._upload_files)
+        return list(self._upload_files)
 
-    def upload_manifest(self) -> list[dict[str, Any]]:
-        """Return files that should be uploaded before finalizing the artifact."""
-        return self.upload_files()
-
-    def finalize_manifest(self) -> dict[str, Any]:
-        """Return the manifest payload used to finalize the artifact."""
-        refs = list({ref["url"]: copy.deepcopy(ref) for ref in self._references}.values())
-        return {"files": [upload["path"] for upload in self._upload_files], "references": refs}
-
-    def to_payload(self) -> dict[str, Any]:
-        """Return a serializable artifact payload."""
-        return {
-            "_type": "artifact",
-            "name": self.name,
-            "artifact_type": self.type,
-            "metadata": copy.deepcopy(self.metadata),
-            "files": self.upload_files(),
-            "manifest": self.finalize_manifest(),
-        }
+    def manifest(self) -> ArtifactManifest:
+        """Return the typed manifest payload used to finalize the artifact."""
+        refs = list({ref.url: ref for ref in self._references}.values())
+        return ArtifactManifest(files=[upload.path for upload in self._upload_files], references=refs)
 
     def _coerce_existing_path(self, value: PathLike) -> Path:
         if not isinstance(value, (str, Path)):
@@ -248,17 +284,17 @@ class Artifact:
                 raise ValueError(f"entry path already exists: {artifact_path}")
         self._used_paths.add(artifact_path)
 
-    def _build_media_upload(self, payload: dict[str, Any], artifact_path: str) -> dict[str, Any]:
+    def _build_media_upload(self, payload: dict[str, Any], artifact_path: str) -> ArtifactUpload:
         if "path" in payload and payload["path"] is not None:
             path = self._coerce_existing_path(payload["path"])
             if not path.is_file():
                 raise ValueError(f"media path must point to a file: {path}")
-            return {"path": artifact_path, "source_path": str(path)}
+            return ArtifactPathUpload(path=artifact_path, source_path=str(path))
         if "data" in payload and payload["data"] is not None:
-            return {"path": artifact_path, "data": payload["data"]}
+            return ArtifactDataUpload(path=artifact_path, data=payload["data"])
         if "html" in payload and payload["html"] is not None:
             encoded = base64.b64encode(str(payload["html"]).encode("utf-8")).decode("ascii")
-            return {"path": artifact_path, "data": encoded}
+            return ArtifactDataUpload(path=artifact_path, data=encoded)
         raise ValueError("media payload is missing content")
 
     def _default_media_name(self, payload: dict[str, Any]) -> str:
@@ -287,28 +323,17 @@ class Artifact:
                 raise ValueError("name must be shorter than 255 bytes per segment")
         return path
 
-    def _join_artifact_path(self, *parts: str) -> str:
-        return self._normalize_artifact_path("/".join(part.strip("/") for part in parts if part))
-
-    def _reference_metadata(self, url: str, parsed: Any) -> dict[str, Any]:
-        scheme = parsed.scheme.lower()
-        if scheme == "file":
-            return self._file_reference_metadata(parsed)
-        if scheme in {"http", "https"}:
-            return self._http_reference_metadata(url)
-        return self._empty_reference_metadata()
-
-    def _http_reference_metadata(self, url: str) -> dict[str, Any]:
+    def _http_reference(self, url: str) -> ArtifactReference:
         request = urllib.request.Request(url, method="HEAD")  # noqa: S310
         try:
             with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
-                return self._headers_reference_metadata(response.headers)
+                return self._headers_reference(url, response.headers)
         except urllib.error.HTTPError as exc:
-            return self._headers_reference_metadata(exc.headers)
+            return self._headers_reference(url, exc.headers)
         except urllib.error.URLError:
-            return self._empty_reference_metadata()
+            return ArtifactReference(url=url)
 
-    def _file_reference_metadata(self, parsed: Any) -> dict[str, Any]:
+    def _file_reference(self, url: str, parsed: Any) -> ArtifactReference:
         if parsed.netloc:
             raise ValueError("file:// URLs must not include an authority")
         path_text = urllib.request.url2pathname(unquote(parsed.path))
@@ -319,53 +344,39 @@ class Artifact:
             raise ValueError(f"path must point to a file: {path}")
 
         stat = path.stat()
-        return {
-            "size": stat.st_size,
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-            "etag": None,
-            "last_modified": formatdate(stat.st_mtime, usegmt=True),
-        }
+        return ArtifactReference(
+            url=url,
+            size=stat.st_size,
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+            last_modified=formatdate(stat.st_mtime, usegmt=True),
+        )
 
-    def _headers_reference_metadata(self, headers: Message | None) -> dict[str, Any]:
+    def _headers_reference(self, url: str, headers: Message | None) -> ArtifactReference:
         if headers is None:
-            return self._empty_reference_metadata()
-        size = self._header_size(headers.get("Content-Length"))
-        return {
-            "size": size,
-            "sha256": self._header_sha256(headers),
-            "etag": headers.get("ETag"),
-            "last_modified": headers.get("Last-Modified"),
-        }
+            return ArtifactReference(url=url)
+        return ArtifactReference(
+            url=url,
+            size=self._header_size(headers.get("Content-Length")),
+            sha256=self._header_sha256(headers),
+            etag=headers.get("ETag"),
+            last_modified=headers.get("Last-Modified"),
+        )
 
     def _header_size(self, value: str | None) -> int | None:
-        if value is None:
-            return None
         try:
-            size = int(value)
+            return int(value) if value is not None and int(value) >= 0 else None
         except ValueError:
             return None
-        return size if size >= 0 else None
 
     def _header_sha256(self, headers: Message) -> str | None:
         for header_name in ("X-Checksum-Sha256", "X-Amz-Checksum-Sha256"):
             if value := headers.get(header_name):
-                return self._normalize_sha256(value)
-        if digest := headers.get("Digest"):
-            for item in digest.split(","):
-                algorithm, _, value = item.strip().partition("=")
-                if algorithm.lower() in {"sha-256", "sha256"} and value:
-                    return self._normalize_sha256(value.strip().strip('"'))
+                candidate = value.strip()
+                if len(candidate) == 64 and all(char in "0123456789abcdefABCDEF" for char in candidate):
+                    return candidate.lower()
+                try:
+                    decoded = base64.b64decode(candidate, validate=True)
+                    return decoded.hex() if len(decoded) == 32 else candidate
+                except binascii.Error:
+                    return candidate
         return None
-
-    def _normalize_sha256(self, value: str) -> str:
-        candidate = value.strip()
-        if len(candidate) == 64 and all(char in "0123456789abcdefABCDEF" for char in candidate):
-            return candidate.lower()
-        try:
-            decoded = base64.b64decode(candidate, validate=True)
-        except binascii.Error:
-            return candidate
-        return decoded.hex() if len(decoded) == 32 else candidate
-
-    def _empty_reference_metadata(self) -> dict[str, Any]:
-        return {"size": None, "sha256": None, "etag": None, "last_modified": None}

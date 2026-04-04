@@ -5,10 +5,12 @@ from __future__ import annotations
 import base64
 import json
 import shutil
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from underfit.artifact import ArtifactDataUpload, ArtifactPathUpload, ArtifactUpload
 from underfit.backends.base import Backend
 
 _ARTIFACT_FILE_NAME = "artifacts.jsonl"
@@ -96,15 +98,15 @@ class LocalBackend(Backend):
         if not isinstance(artifact_name, str) or not artifact_name:
             raise RuntimeError("Artifact is missing a valid name")
 
-        for upload in artifact.upload_files():
+        for upload in artifact.uploads():
             stored_entry = self._store_artifact_file(artifact_name, upload)
             self._append_jsonl(
                 self.run_dir / _ARTIFACT_FILE_NAME,
                 {"artifactName": artifact_name, "entry": stored_entry},
             )
 
-        for reference in artifact.finalize_manifest().get("references", []):
-            record = {"artifactName": artifact_name, "entry": {"kind": "reference", **reference}}
+        for reference in artifact.manifest().references:
+            record = {"artifactName": artifact_name, "entry": {"kind": "reference", **asdict(reference)}}
             self._append_jsonl(self.run_dir / _ARTIFACT_FILE_NAME, record)
 
     def read_scalars(self) -> list[dict[str, Any]]:
@@ -161,23 +163,23 @@ class LocalBackend(Backend):
         }
         self._append_jsonl(self.run_dir / _MEDIA_FILE_NAME, record)
 
-    def _store_artifact_file(self, artifact_name: str, upload: dict[str, Any]) -> dict[str, Any]:
+    def _store_artifact_file(self, artifact_name: str, upload: ArtifactUpload) -> dict[str, Any]:
         destination_root = self.artifact_dir / _slug(artifact_name)
         destination_root.mkdir(parents=True, exist_ok=True)
 
-        artifact_path = upload.get("path")
-        if not isinstance(artifact_path, str) or not artifact_path:
+        artifact_path = upload.path
+        if not artifact_path:
             raise RuntimeError("Artifact upload is missing a valid path")
 
         destination = destination_root / artifact_path
         destination.parent.mkdir(parents=True, exist_ok=True)
-        if source_path := upload.get("source_path"):
-            source = Path(source_path)
+        if isinstance(upload, ArtifactPathUpload):
+            source = Path(upload.source_path)
             if not source.is_file():
                 raise FileNotFoundError(f"artifact source file does not exist: {source}")
             shutil.copy2(source, destination)
-        elif data := upload.get("data"):
-            destination.write_bytes(base64.b64decode(data))
+        elif isinstance(upload, ArtifactDataUpload):
+            destination.write_bytes(base64.b64decode(upload.data))
         else:
             raise RuntimeError("Artifact upload is missing file content")
         return {"kind": "file", "name": artifact_path, "path": str(destination)}

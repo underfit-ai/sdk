@@ -8,11 +8,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone
 from mimetypes import guess_type
 from pathlib import Path
 from typing import Any
 
+from underfit.artifact import ArtifactDataUpload, ArtifactPathUpload, ArtifactUpload
 from underfit.backends.base import Backend
 
 
@@ -300,26 +302,26 @@ class APIBackend(Backend):
         created = self._request(
             "POST",
             f"/accounts/{self.account_handle}/projects/{self.project_name}/artifacts",
-            {"run_id": self._run_id, **artifact.create_payload()},
+            {"run_id": self._run_id, **asdict(artifact.create_request())},
         )
         artifact_id = created.get("id")
         if not isinstance(artifact_id, str) or not artifact_id:
             raise RuntimeError("Underfit artifact creation response did not include an id")
 
-        for upload in artifact.upload_files():
-            artifact_path = upload.get("path")
-            if not isinstance(artifact_path, str) or not artifact_path:
+        for upload in artifact.uploads():
+            artifact_path = upload.path
+            if not artifact_path:
                 raise RuntimeError("Artifact upload is missing a valid path")
             path = f"/artifacts/{artifact_id}/files/{urllib.parse.quote(artifact_path, safe='/')}"
             self._request_bytes("PUT", path, self._artifact_bytes(upload))
 
-        self._request("POST", f"/artifacts/{artifact_id}/finalize", {"manifest": artifact.finalize_manifest()})
+        self._request("POST", f"/artifacts/{artifact_id}/finalize", {"manifest": asdict(artifact.manifest())})
 
-    def _artifact_bytes(self, upload: dict[str, Any]) -> bytes:
-        if source_path := upload.get("source_path"):
-            return Path(source_path).read_bytes()
-        if data := upload.get("data"):
-            return base64.b64decode(data)
+    def _artifact_bytes(self, upload: ArtifactUpload) -> bytes:
+        if isinstance(upload, ArtifactPathUpload):
+            return Path(upload.source_path).read_bytes()
+        if isinstance(upload, ArtifactDataUpload):
+            return base64.b64decode(upload.data)
         raise RuntimeError("Artifact upload is missing file content")
 
     def read_scalars(self) -> list[dict[str, Any]]:

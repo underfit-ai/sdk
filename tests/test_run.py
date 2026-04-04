@@ -12,7 +12,7 @@ from zipfile import ZipFile
 
 import pytest
 
-from underfit.artifact import Artifact
+from underfit.artifact import Artifact, ArtifactDataUpload
 from underfit.backends.base import Backend
 from underfit.media import Html
 from underfit.run import Run
@@ -130,10 +130,10 @@ def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
 
     assert artifact.name == "source-code"
     assert [logged.name for logged in backend.artifact_calls] == ["source-code"]
-    uploads = backend.artifact_calls[0].upload_files()
-    assert uploads[0]["path"] == "source-code.zip"
-
-    archive_bytes = base64.b64decode(uploads[0]["data"])
+    uploads = backend.artifact_calls[0].uploads()
+    assert isinstance(uploads[0], ArtifactDataUpload)
+    assert uploads[0].path == "source-code.zip"
+    archive_bytes = base64.b64decode(uploads[0].data)
     with ZipFile(BytesIO(archive_bytes)) as archive:
         assert archive.namelist() == ["keep.py"]
         assert archive.read("keep.py") == b"print('keep')\n"
@@ -174,9 +174,10 @@ def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: p
         "untracked_files": ["new.py"],
     }
     assert [logged.name for logged in backend.artifact_calls] == ["git-state"]
-    uploads = backend.artifact_calls[0].upload_files()
-    assert uploads[0]["path"] == "working-tree.patch"
-    assert base64.b64decode(uploads[0]["data"]) == tracked_patch
+    uploads = backend.artifact_calls[0].uploads()
+    assert isinstance(uploads[0], ArtifactDataUpload)
+    assert uploads[0].path == "working-tree.patch"
+    assert base64.b64decode(uploads[0].data) == tracked_patch
 
 
 def test_log_model_logs_bytes_checkpoint() -> None:
@@ -189,7 +190,11 @@ def test_log_model_logs_bytes_checkpoint() -> None:
     assert artifact.name == "model-checkpoint"
     assert artifact.type == "model"
     assert backend.artifact_calls == [artifact]
-    assert artifact.upload_files() == [{"path": "checkpoint.bin", "data": base64.b64encode(b"weights").decode("ascii")}]
+    assert len(artifact.uploads()) == 1
+    upload = artifact.uploads()[0]
+    assert isinstance(upload, ArtifactDataUpload)
+    assert upload.path == "checkpoint.bin"
+    assert upload.data == base64.b64encode(b"weights").decode("ascii")
 
 
 def test_finish_is_idempotent_and_blocks_future_writes() -> None:
