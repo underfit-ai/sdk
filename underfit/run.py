@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Union
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from underfit.artifact import Artifact
 from underfit.backends.base import Backend
@@ -11,6 +14,34 @@ from underfit.media import Audio, Html, Image, Video
 
 PathLike = Union[str, Path]
 PathOrBytes = Union[str, Path, bytes, bytearray, memoryview]
+
+
+def _git_output(repo_path: Path, args: list[str], *, ok_returncodes: tuple[int, ...] = (0,)) -> bytes:
+    try:
+        result = subprocess.run(["git", *args], cwd=repo_path, capture_output=True, check=False)  # noqa: S603,S607
+    except FileNotFoundError as exc:
+        raise RuntimeError("git is not installed") from exc
+
+    if result.returncode not in ok_returncodes:
+        command = " ".join(["git", *args])
+        message = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(message or f"{command} failed with exit code {result.returncode}")
+    return result.stdout
+
+
+def _git_text(repo_path: Path, args: list[str], *, ok_returncodes: tuple[int, ...] = (0,)) -> str:
+    return _git_output(repo_path, args, ok_returncodes=ok_returncodes).decode("utf-8").strip()
+
+
+def _join_bytes(chunks: list[bytes]) -> bytes:
+    output = bytearray()
+    for chunk in chunks:
+        if not chunk:
+            continue
+        if output and not output.endswith(b"\n"):
+            output.extend(b"\n")
+        output.extend(chunk)
+    return bytes(output)
 
 
 class Run:
@@ -47,25 +78,39 @@ class Run:
 
         Raises:
             RuntimeError: If the run has already been finished.
-            TypeError: If a logged value is boolean.
+            TypeError: If a logged value or key is unsupported.
         """
         self._require_active()
         scalar_values: dict[str, float] = {}
         media_batches: list[tuple[str, list[Any]]] = []
+        items: list[tuple[str, Any]] = []
+
+        def flatten(prefix: str, value: Any) -> None:
+            if isinstance(value, dict):
+                for child_key, child_value in value.items():
+                    if not isinstance(child_key, str):
+                        raise TypeError(f"Log keys must be strings: {prefix}")
+                    flatten(f"{prefix}/{child_key}", child_value)
+                return
+            items.append((prefix, value))
 
         for key, value in data.items():
-            if isinstance(value, bool):
-                raise TypeError(f"Boolean values are not supported for underfit.Run.log: {key}")
-            if isinstance(value, (int, float)):
+            if not isinstance(key, str):
+                raise TypeError("Log keys must be strings")
+            flatten(key, value)
+
+        for key, value in items:
+            if isinstance(value, (bool, int, float)):
                 scalar_values[key] = float(value)
             elif isinstance(value, (Html, Image, Video, Audio)):
                 media_batches.append((key, [value]))
-            elif isinstance(value, (list, tuple)) and value and all(
-                isinstance(v, (Html, Image, Video, Audio)) for v in value
-            ):
-                media_batches.append((key, list(value)))
+            elif isinstance(value, (list, tuple)):
+                if value and all(isinstance(v, (Html, Image, Video, Audio)) for v in value):
+                    media_batches.append((key, list(value)))
+                else:
+                    raise TypeError(f"Lists passed to underfit.Run.log must contain only media objects: {key}")
             else:
-                continue
+                raise TypeError(f"Unsupported value for underfit.Run.log: {key}")
 
         if scalar_values:
             self.backend.log_scalars(scalar_values, step)
@@ -81,7 +126,7 @@ class Run:
         include: Callable[[Path], bool] | None = None,
         exclude: Callable[[Path], bool] | None = None,
     ) -> Artifact:
-        """Upload source code files under a root path as an artifact.
+        """Upload source code under a root path as a zip artifact.
 
         Args:
             root_path: Root directory to scan. Defaults to the current working directory.
@@ -92,7 +137,7 @@ class Run:
                 absolute file path and returns True to exclude it.
 
         Returns:
-            Artifact containing matched files from the root path.
+            Artifact containing a zip archive of matched files from the root path.
 
         Raises:
             FileNotFoundError: If ``root_path`` does not exist.
@@ -110,11 +155,76 @@ class Run:
         artifact = Artifact(name or "source-code", "code")
         include_match = include or (lambda path: path.suffix == ".py")
         paths = sorted((path for path in resolved_root.rglob("*") if path.is_file()), key=lambda path: path.as_posix())
+        matched_paths = [path for path in paths if include_match(path) and (exclude is None or not exclude(path))]
 
-        for path in paths:
-            if include_match(path) and (exclude is None or not exclude(path)):
-                artifact.add_file(path, name=path.relative_to(resolved_root).as_posix())
+        if matched_paths:
+            buffer = BytesIO()
+            with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
+                for path in matched_paths:
+                    entry_name = path.relative_to(resolved_root).as_posix()
+                    info = ZipInfo(entry_name)
+                    info.compress_type = ZIP_DEFLATED
+                    info.date_time = (1980, 1, 1, 0, 0, 0)
+                    archive.writestr(info, path.read_bytes())
+            artifact.add_bytes(buffer.getvalue(), name=f"{artifact.name}.zip")
 
+        self.log_artifact(artifact)
+        return artifact
+
+    def log_git(self, repo_path: PathLike | None = None, *, name: str | None = None) -> Artifact:
+        """Upload the current git state as an artifact.
+
+        Args:
+            repo_path: Git repository path. Defaults to the current working directory.
+            name: Optional artifact name.
+
+        Returns:
+            Artifact containing the working tree patch and git metadata.
+
+        Raises:
+            FileNotFoundError: If ``repo_path`` does not exist.
+            RuntimeError: If git is not installed, the path is not in a git
+                repository, or the run has already been finished.
+            ValueError: If ``repo_path`` is not a directory.
+        """
+        self._require_active()
+        repo = Path.cwd() if repo_path is None else Path(repo_path)
+        if not repo.exists():
+            raise FileNotFoundError(f"repo_path does not exist: {repo}")
+        if not repo.is_dir():
+            raise ValueError(f"repo_path must point to a directory: {repo}")
+
+        repo_root = Path(_git_text(repo, ["rev-parse", "--show-toplevel"]))
+        status = _git_text(repo_root, ["status", "--porcelain=v2", "--branch"], ok_returncodes=(0, 128))
+        head = None
+        branch = None
+        untracked_files: list[str] = []
+
+        for line in status.splitlines():
+            if line.startswith("# branch.oid "):
+                value = line.removeprefix("# branch.oid ")
+                head = None if value == "(initial)" else value
+            elif line.startswith("# branch.head "):
+                value = line.removeprefix("# branch.head ")
+                branch = None if value == "(detached)" else value
+            elif line.startswith("? "):
+                untracked_files.append(line[2:])
+
+        patch = (
+            _git_output(repo_root, ["diff", "--binary", "HEAD"])
+            if head is not None
+            else _join_bytes([
+                _git_output(repo_root, ["diff", "--binary", "--cached"]),
+                _git_output(repo_root, ["diff", "--binary"]),
+            ])
+        )
+        artifact = Artifact(name or "git-state", "git", metadata={
+            "commit": head,
+            "branch": branch,
+            "is_dirty": bool(patch) or bool(untracked_files),
+            "untracked_files": untracked_files,
+        })
+        artifact.add_bytes(patch, name="working-tree.patch")
         self.log_artifact(artifact)
         return artifact
 

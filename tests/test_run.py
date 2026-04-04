@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import importlib
+import subprocess
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
 
 import pytest
 
@@ -11,6 +16,8 @@ from underfit.artifact import Artifact
 from underfit.backends.base import Backend
 from underfit.media import Html
 from underfit.run import Run
+
+run_module = importlib.import_module("underfit.run")
 
 
 class _RecordingBackend(Backend):
@@ -65,25 +72,36 @@ def test_run_copies_config_on_init() -> None:
 
 
 def test_log_records_scalars_and_media() -> None:
-    """Send scalar and media payloads to the backend."""
+    """Flatten nested data and send supported payloads to the backend."""
     backend = _RecordingBackend()
     run = Run("project", "run", backend)
 
-    run.log({"loss": 1, "report": Html("<h1>ok</h1>"), "gallery": [Html("<p>a</p>"), Html("<p>b</p>")]}, step=3)
+    run.log(
+        {
+            "train": {"loss": 1, "done": True},
+            "report": Html("<h1>ok</h1>"),
+            "samples": {"gallery": [Html("<p>a</p>"), Html("<p>b</p>")]},
+        },
+        step=3,
+    )
 
-    assert backend.scalar_calls == [({"loss": 1.0}, 3)]
+    assert backend.scalar_calls == [({"train/loss": 1.0, "train/done": 1.0}, 3)]
     assert len(backend.media_calls) == 2
     assert backend.media_calls[0][0:2] == ("report", 3)
-    assert backend.media_calls[1][0:2] == ("gallery", 3)
+    assert backend.media_calls[1][0:2] == ("samples/gallery", 3)
     assert [payload["_type"] for payload in backend.media_calls[1][2]] == ["html", "html"]
 
 
-def test_log_rejects_boolean_scalars() -> None:
-    """Reject booleans instead of treating them as numeric values."""
-    run = Run("project", "run", _RecordingBackend())
+def test_log_rejects_unsupported_values() -> None:
+    """Reject unsupported values instead of silently dropping them."""
+    backend = _RecordingBackend()
+    run = Run("project", "run", backend)
 
-    with pytest.raises(TypeError, match="Boolean values are not supported"):
-        run.log({"done": True})
+    with pytest.raises(TypeError, match="Lists passed to underfit.Run.log must contain only media objects: train/tags"):
+        run.log({"train": {"loss": 1.0, "tags": ["baseline"]}})
+
+    assert backend.scalar_calls == []
+    assert backend.media_calls == []
 
 
 def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
@@ -107,7 +125,58 @@ def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
 
     assert artifact.name == "source-code"
     assert [name for name, _entry in backend.artifact_calls] == ["source-code"]
-    assert backend.artifact_calls[0][1]["name"] == "keep.py"
+    assert backend.artifact_calls[0][1]["name"] == "source-code.zip"
+    assert backend.artifact_calls[0][1]["kind"] == "bytes"
+
+    archive_bytes = base64.b64decode(backend.artifact_calls[0][1]["data"])
+    with ZipFile(BytesIO(archive_bytes)) as archive:
+        assert archive.namelist() == ["keep.py"]
+        assert archive.read("keep.py") == b"print('keep')\n"
+
+
+def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Capture git metadata on the artifact and upload the working tree patch."""
+    backend = _RecordingBackend()
+    run = Run("project", "run", backend)
+    repo_root = tmp_path.resolve()
+    tracked_patch = b"diff --git a/app.py b/app.py\n"
+    status_output = "# branch.oid abc123\n# branch.head main\n? new.py"
+
+    def fake_run(
+        args: list[str],
+        cwd: Path,
+        capture_output: bool,
+        check: bool,
+    ) -> subprocess.CompletedProcess[bytes]:
+        assert args[0] == "git"
+        assert cwd == repo_root
+        assert capture_output is True
+        assert check is False
+
+        command = args[1:]
+        if command == ["rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(args, 0, stdout=f"{repo_root}\n".encode(), stderr=b"")
+        if command == ["status", "--porcelain=v2", "--branch"]:
+            return subprocess.CompletedProcess(args, 0, stdout=f"{status_output}\n".encode(), stderr=b"")
+        if command == ["diff", "--binary", "HEAD"]:
+            return subprocess.CompletedProcess(args, 0, stdout=tracked_patch, stderr=b"")
+        raise AssertionError(f"unexpected git command: {command}")
+
+    monkeypatch.setattr(run_module.subprocess, "run", fake_run)
+
+    artifact = run.log_git(repo_root)
+
+    assert artifact.name == "git-state"
+    assert artifact.metadata == {
+        "commit": "abc123",
+        "branch": "main",
+        "is_dirty": True,
+        "untracked_files": ["new.py"],
+    }
+    assert [name for name, _entry in backend.artifact_calls] == ["git-state"]
+    assert backend.artifact_calls[0][1]["name"] == "working-tree.patch"
+    assert backend.artifact_calls[0][1]["kind"] == "bytes"
+    assert base64.b64decode(backend.artifact_calls[0][1]["data"]) == tracked_patch
 
 
 def test_finish_is_idempotent_and_blocks_future_writes() -> None:

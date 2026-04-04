@@ -10,11 +10,11 @@ from underfit.artifact import Artifact
 from underfit.backends.api import APIBackend
 from underfit.backends.local import LocalBackend
 from underfit.media import Audio, Html, Image, Video
-from underfit.run import PathOrBytes, Run
+from underfit.run import PathLike, PathOrBytes, Run
 
 __all__ = [
     "Artifact", "Audio", "Html", "Image", "Run", "Video",
-    "finish", "init", "log", "log_model", "run",
+    "finish", "init", "log", "log_git", "log_model", "run",
 ]
 
 run: Run | None = None
@@ -74,6 +74,11 @@ def init(
 def log(data: dict[str, Any], step: int | None = None) -> None:
     """Log metrics to the current run."""
     _require_run().log(data, step=step)
+
+
+def log_git(repo_path: PathLike | None = None, *, name: str | None = None) -> Artifact:
+    """Log the current git state to the active run."""
+    return _require_run().log_git(repo_path, name=name)
 
 
 def log_model(checkpoint: PathOrBytes, *, name: str | None = None) -> Artifact:
