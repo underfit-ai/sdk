@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import urllib.error
 from email.message import Message
 from pathlib import Path
@@ -19,6 +20,7 @@ def test_artifact_builds_create_payload_uploads_and_manifest(tmp_path: Path) -> 
     metrics.write_text('{"loss": 0.1}\n')
     model_card = tmp_path / "model-card.txt"
     model_card.write_text("hello\n")
+    os.utime(model_card, (1445412480, 1445412480))
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "a.txt").write_text("a")
@@ -45,7 +47,7 @@ def test_artifact_builds_create_payload_uploads_and_manifest(tmp_path: Path) -> 
             "size": 6,
             "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
             "etag": None,
-            "last_modified": artifact.finalize_manifest()["references"][0]["last_modified"],
+            "last_modified": "Wed, 21 Oct 2015 07:28:00 GMT",
         }],
     }
 
@@ -62,6 +64,22 @@ def test_artifact_add_media_uses_uploadable_file_content() -> None:
         "data": base64.b64encode(b"<h1>ok</h1>").decode("ascii"),
     }]
     assert artifact.finalize_manifest() == {"files": ["media-1.html"], "references": []}
+
+
+def test_artifact_upload_manifest_and_payload_include_files_and_manifest() -> None:
+    """Expose upload files and manifest through public helper methods."""
+    artifact = Artifact("report", "report", metadata={"tag": "latest"})
+    artifact.add_bytes(b"ok", name="report.txt")
+
+    assert artifact.upload_manifest() == artifact.upload_files()
+    assert artifact.to_payload() == {
+        "_type": "artifact",
+        "name": "report",
+        "artifact_type": "report",
+        "metadata": {"tag": "latest"},
+        "files": [{"path": "report.txt", "data": base64.b64encode(b"ok").decode("ascii")}],
+        "manifest": {"files": ["report.txt"], "references": []},
+    }
 
 
 def test_artifact_rejects_invalid_and_conflicting_paths() -> None:

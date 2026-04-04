@@ -25,10 +25,13 @@ class _RecordingBackend(Backend):
         self.scalar_calls: list[tuple[dict[str, float], int | None]] = []
         self.media_calls: list[tuple[str, int | None, list[dict[str, Any]]]] = []
         self.artifact_calls: list[Artifact] = []
+        self.read_scalars_calls = 0
+        self.read_logs_calls: list[str | None] = []
+        self.read_artifact_entries_calls: list[str | None] = []
         self.finish_calls = 0
         self.scalars_result = [{"step": 1, "values": {"loss": 0.5}}]
-        self.logs_result = [{"workerId": "stdout", "content": "hello"}]
-        self.artifacts_result = [{"artifactName": "model"}]
+        self.logs_result = [{"workerId": "stdout", "content": "hello"}, {"workerId": "stderr", "content": "warn"}]
+        self.artifacts_result = [{"artifactName": "model"}, {"artifactName": "dataset"}]
 
     @property
     def run_name(self) -> str:
@@ -49,14 +52,17 @@ class _RecordingBackend(Backend):
         self.artifact_calls.append(artifact)
 
     def read_scalars(self) -> list[dict[str, Any]]:
+        self.read_scalars_calls += 1
         return self.scalars_result
 
     def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
+        self.read_logs_calls.append(worker_id)
         if worker_id is None:
             return self.logs_result
         return [record for record in self.logs_result if record["workerId"] == worker_id]
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
+        self.read_artifact_entries_calls.append(artifact_name)
         if artifact_name is None:
             return self.artifacts_result
         return [record for record in self.artifacts_result if record["artifactName"] == artifact_name]
@@ -78,14 +84,11 @@ def test_log_records_scalars_and_media() -> None:
     backend = _RecordingBackend()
     run = Run("project", "run", backend)
 
-    run.log(
-        {
-            "train": {"loss": 1, "done": True},
-            "report": Html("<h1>ok</h1>"),
-            "samples": {"gallery": [Html("<p>a</p>"), Html("<p>b</p>")]},
-        },
-        step=3,
-    )
+    run.log({
+        "train": {"loss": 1, "done": True},
+        "report": Html("<h1>ok</h1>"),
+        "samples": {"gallery": [Html("<p>a</p>"), Html("<p>b</p>")]},
+    }, step=3)
 
     assert backend.scalar_calls == [({"train/loss": 1.0, "train/done": 1.0}, 3)]
     assert len(backend.media_calls) == 2
@@ -144,12 +147,7 @@ def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: p
     tracked_patch = b"diff --git a/app.py b/app.py\n"
     status_output = "# branch.oid abc123\n# branch.head main\n? new.py"
 
-    def fake_run(
-        args: list[str],
-        cwd: Path,
-        capture_output: bool,
-        check: bool,
-    ) -> subprocess.CompletedProcess[bytes]:
+    def fake_run(args: list[str], cwd: Path, capture_output: bool, check: bool) -> subprocess.CompletedProcess[bytes]:
         assert args[0] == "git"
         assert cwd == repo_root
         assert capture_output is True
@@ -181,6 +179,19 @@ def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: p
     assert base64.b64decode(uploads[0]["data"]) == tracked_patch
 
 
+def test_log_model_logs_bytes_checkpoint() -> None:
+    """Upload bytes checkpoints as a model artifact."""
+    backend = _RecordingBackend()
+    run = Run("project", "run", backend)
+
+    artifact = run.log_model(b"weights")
+
+    assert artifact.name == "model-checkpoint"
+    assert artifact.type == "model"
+    assert backend.artifact_calls == [artifact]
+    assert artifact.upload_files() == [{"path": "checkpoint.bin", "data": base64.b64encode(b"weights").decode("ascii")}]
+
+
 def test_finish_is_idempotent_and_blocks_future_writes() -> None:
     """Allow repeated finish calls but reject later write operations."""
     backend = _RecordingBackend()
@@ -202,5 +213,8 @@ def test_read_methods_delegate_to_backend() -> None:
     run = Run("project", "run", backend)
 
     assert run.read_scalars() == backend.scalars_result
-    assert run.read_logs("stdout") == backend.logs_result
-    assert run.read_artifact_entries("model") == backend.artifacts_result
+    assert backend.read_scalars_calls == 1
+    assert run.read_logs("stdout") == [backend.logs_result[0]]
+    assert backend.read_logs_calls == ["stdout"]
+    assert run.read_artifact_entries("model") == [backend.artifacts_result[0]]
+    assert backend.read_artifact_entries_calls == ["model"]
