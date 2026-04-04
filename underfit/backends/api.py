@@ -24,9 +24,15 @@ def _now_iso() -> str:
 
 def _normalize_api_url(url: str) -> str:
     normalized = url.strip().rstrip("/")
-    if normalized.endswith("/api/v1"):
-        return normalized
-    return f"{normalized}/api/v1"
+    return normalized if normalized.endswith("/api/v1") else f"{normalized}/api/v1"
+
+
+class _RequestError(RuntimeError):
+    def __init__(self, method: str, path: str, status_code: int | None, details: str, payload: Any = None) -> None:
+        label = f"{status_code} {method} {path}" if status_code is not None else f"{method} {path}"
+        super().__init__(f"Underfit request failed ({label}): {details}")
+        self.status_code = status_code
+        self.payload = payload
 
 
 class APIBackend(Backend):
@@ -60,7 +66,8 @@ class APIBackend(Backend):
         self.scalar_line = 0
         self._run_id: str | None = None
         self._run_name = run_name.lower() if run_name else None
-        self._log_line_offsets: dict[str, int] = {"stdout": 0, "stderr": 0}
+        self._registered_workers = {"0"}
+        self._log_line_offsets: dict[str, int] = {}
         self._create_run(run_config)
 
     @property
@@ -70,7 +77,7 @@ class APIBackend(Backend):
             raise RuntimeError("Run name is not initialized")
         return self._run_name
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(  # noqa: S310
             url=f"{self.api_url}{path}",
@@ -78,48 +85,22 @@ class APIBackend(Backend):
             method=method,
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
         )
-        try:
-            with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
-                body = response.read().decode("utf-8")
-                return {} if not body else json.loads(body)
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8")
-            details = body
-            if body:
-                try:
-                    details = json.dumps(json.loads(body), sort_keys=True)
-                except json.JSONDecodeError:
-                    details = body
-            raise RuntimeError(f"Underfit request failed ({e.code} {method} {path}): {details}") from e
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"Underfit request failed ({method} {path}): {e.reason}") from e
+        return self._send_request(request, method, path, timeout=10)
 
     def _request_multipart(self, method: str, path: str, body: bytes, boundary: str) -> dict[str, Any]:
-        headers = {
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Authorization": f"Bearer {self.api_key}",
-        }
         request = urllib.request.Request(  # noqa: S310
             url=f"{self.api_url}{path}",
             data=body,
             method=method,
-            headers=headers,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Authorization": f"Bearer {self.api_key}",
+            },
         )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
-                body_text = response.read().decode("utf-8")
-                return {} if not body_text else json.loads(body_text)
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
-            details = error_body
-            if error_body:
-                try:
-                    details = json.dumps(json.loads(error_body), sort_keys=True)
-                except json.JSONDecodeError:
-                    details = error_body
-            raise RuntimeError(f"Underfit request failed ({e.code} {method} {path}): {details}") from e
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"Underfit request failed ({method} {path}): {e.reason}") from e
+        response = self._send_request(request, method, path, timeout=30)
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Underfit request returned an unexpected response type for {method} {path}")
+        return response
 
     def _request_bytes(
         self,
@@ -134,21 +115,43 @@ class APIBackend(Backend):
             method=method,
             headers={"Content-Type": content_type, "Authorization": f"Bearer {self.api_key}"},
         )
+        response = self._send_request(request, method, path, timeout=30)
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Underfit request returned an unexpected response type for {method} {path}")
+        return response
+
+    def _send_request(self, request: urllib.request.Request, method: str, path: str, timeout: int) -> Any:
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
-                response_body = response.read().decode("utf-8")
-                return {} if not response_body else json.loads(response_body)
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+                body = response.read().decode("utf-8")
+                return {} if not body else json.loads(body)
         except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
-            details = error_body
-            if error_body:
-                try:
-                    details = json.dumps(json.loads(error_body), sort_keys=True)
-                except json.JSONDecodeError:
-                    details = error_body
-            raise RuntimeError(f"Underfit request failed ({e.code} {method} {path}): {details}") from e
+            payload, details = self._decode_error_body(e.read().decode("utf-8"))
+            raise _RequestError(method, path, e.code, details, payload) from e
         except urllib.error.URLError as e:
-            raise RuntimeError(f"Underfit request failed ({method} {path}): {e.reason}") from e
+            raise _RequestError(method, path, None, str(e.reason)) from e
+
+    @staticmethod
+    def _decode_error_body(body: str) -> tuple[Any, str]:
+        if not body:
+            return None, ""
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return body, body
+        return payload, json.dumps(payload, sort_keys=True)
+
+    @staticmethod
+    def _expected_start_line(error: _RequestError) -> int | None:
+        payload = error.payload
+        if not isinstance(payload, dict):
+            return None
+        detail = payload.get("detail")
+        if isinstance(detail, dict) and isinstance(detail.get("expectedStartLine"), int):
+            return detail["expectedStartLine"]
+        if isinstance(payload.get("expectedStartLine"), int):
+            return payload["expectedStartLine"]
+        return None
 
     def _build_media_file(self, key: str, payload: dict[str, Any]) -> tuple[str, bytes, str]:
         if "path" in payload and payload["path"] is not None:
@@ -172,13 +175,13 @@ class APIBackend(Backend):
         parts: list[bytes] = []
 
         for filename, content, content_type in files:
-            part_headers = [
+            headers = [
                 f"--{boundary}",
                 f"Content-Disposition: form-data; name=\"files\"; filename=\"{filename}\"",
                 f"Content-Type: {content_type}",
                 "",
             ]
-            parts.append("\r\n".join(part_headers).encode("utf-8"))
+            parts.append("\r\n".join(headers).encode("utf-8"))
             parts.append(content)
             parts.append(b"\r\n")
 
@@ -192,13 +195,11 @@ class APIBackend(Backend):
         parts.append(json.dumps(metadata, separators=(",", ":")).encode("utf-8"))
         parts.append(b"\r\n")
         parts.append(f"--{boundary}--\r\n".encode())
-
-        body = b"".join(parts)
-        return body, boundary
+        return b"".join(parts), boundary
 
     def _resolve_account_handle(self) -> str:
         response = self._request("GET", "/me")
-        handle = response.get("handle")
+        handle = response.get("handle") if isinstance(response, dict) else None
         if not isinstance(handle, str) or not handle:
             raise RuntimeError("Underfit /me response missing handle")
         return handle.lower()
@@ -210,10 +211,10 @@ class APIBackend(Backend):
         response = self._request(
             "POST",
             f"/accounts/{self.account_handle}/projects/{self.project_name}/runs",
-            {"status": "running", "config": run_config or None},
+            {"workerLabel": "0", "status": "running", "config": run_config or None},
         )
-        run_id = response.get("id")
-        name = response.get("name")
+        run_id = response.get("id") if isinstance(response, dict) else None
+        name = response.get("name") if isinstance(response, dict) else None
         if not isinstance(run_id, str) or not run_id:
             raise RuntimeError("Underfit run creation response did not include a run id")
         if not isinstance(name, str) or not name:
@@ -221,55 +222,71 @@ class APIBackend(Backend):
         self._run_id = run_id
         self._run_name = name.lower()
 
+    def _ensure_worker(self, worker_label: str) -> None:
+        if worker_label in self._registered_workers:
+            return
+        try:
+            self._request(
+                "POST",
+                f"{self._base_run_path()}/workers",
+                {"workerLabel": worker_label, "status": "running"},
+            )
+        except _RequestError as e:
+            if e.status_code != 409:
+                raise
+        self._registered_workers.add(worker_label)
+
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
         """Append scalar metric values for a run."""
         if not values:
             return
 
         payload = {
+            "workerLabel": "0",
             "startLine": self.scalar_line,
             "scalars": [{"step": step, "values": values, "timestamp": _now_iso()}],
         }
-        response = self._request("POST", f"{self._base_run_path()}/scalars", payload)
-        if response.get("status") == "buffered":
-            self.scalar_line += 1
-            return
-
-        expected = response.get("expectedStartLine")
-        if isinstance(expected, int):
+        try:
+            response = self._request("POST", f"{self._base_run_path()}/scalars", payload)
+        except _RequestError as e:
+            expected = self._expected_start_line(e)
+            if e.status_code != 409 or expected is None:
+                raise
             payload["startLine"] = expected
-            retry = self._request("POST", f"{self._base_run_path()}/scalars", payload)
-            if retry.get("status") == "buffered":
-                self.scalar_line = expected + 1
-                return
+            response = self._request("POST", f"{self._base_run_path()}/scalars", payload)
+            self.scalar_line = expected + len(payload["scalars"])
+        else:
+            self.scalar_line += len(payload["scalars"])
 
-        raise RuntimeError("Failed to append scalars to Underfit API")
+        if not isinstance(response, dict) or response.get("status") != "buffered":
+            raise RuntimeError("Failed to append scalars to Underfit API")
 
     def log_lines(self, worker_id: str, lines: list[str]) -> None:
         """Append console log lines for a run."""
         if not lines:
             return
 
+        self._ensure_worker(worker_id)
         start_line = self._log_line_offsets.get(worker_id, 0)
         payload = {
-            "workerId": worker_id,
+            "workerLabel": worker_id,
             "startLine": start_line,
             "lines": [{"timestamp": _now_iso(), "content": line} for line in lines],
         }
-        response = self._request("POST", f"{self._base_run_path()}/logs", payload)
-        if response.get("status") == "buffered":
-            self._log_line_offsets[worker_id] = start_line + len(lines)
-            return
-
-        expected = response.get("expectedStartLine")
-        if isinstance(expected, int):
+        try:
+            response = self._request("POST", f"{self._base_run_path()}/logs", payload)
+        except _RequestError as e:
+            expected = self._expected_start_line(e)
+            if e.status_code != 409 or expected is None:
+                raise
             payload["startLine"] = expected
-            retry = self._request("POST", f"{self._base_run_path()}/logs", payload)
-            if retry.get("status") == "buffered":
-                self._log_line_offsets[worker_id] = expected + len(lines)
-                return
+            response = self._request("POST", f"{self._base_run_path()}/logs", payload)
+            self._log_line_offsets[worker_id] = expected + len(lines)
+        else:
+            self._log_line_offsets[worker_id] = start_line + len(lines)
 
-        raise RuntimeError("Failed to append logs to Underfit API")
+        if not isinstance(response, dict) or response.get("status") != "buffered":
+            raise RuntimeError("Failed to append logs to Underfit API")
 
     def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
         """Append media files for a run under a shared key and step."""
@@ -282,16 +299,15 @@ class APIBackend(Backend):
         if media_type not in {"image", "video", "audio", "html"}:
             raise RuntimeError(f"unsupported media type: {media_type}")
 
-        files = []
-        for idx, payload in enumerate(payloads):
-            name = f"{key}-{idx}"
-            files.append(self._build_media_file(name, payload))
-
+        files = [self._build_media_file(f"{key}-{idx}", payload) for idx, payload in enumerate(payloads)]
         excluded = {"_type", "path", "data", "html"}
         metadata_fields = {k: v for k, v in payloads[0].items() if k not in excluded and v is not None}
-        metadata_payload = {"key": key, "step": step, "type": media_type, "metadata": metadata_fields or None}
-
-        body, boundary = self._encode_multipart(files, metadata_payload)
+        body, boundary = self._encode_multipart(files, {
+            "key": key,
+            "step": step,
+            "type": media_type,
+            "metadata": metadata_fields or None,
+        })
         self._request_multipart("POST", f"{self._base_run_path()}/media", body, boundary)
 
     def log_artifact(self, artifact: Any) -> None:
@@ -304,7 +320,7 @@ class APIBackend(Backend):
             f"/accounts/{self.account_handle}/projects/{self.project_name}/artifacts",
             {"run_id": self._run_id, **asdict(artifact.create_request())},
         )
-        artifact_id = created.get("id")
+        artifact_id = created.get("id") if isinstance(created, dict) else None
         if not isinstance(artifact_id, str) or not artifact_id:
             raise RuntimeError("Underfit artifact creation response did not include an id")
 
@@ -340,7 +356,7 @@ class APIBackend(Backend):
 
     def finish(self) -> None:
         """Finalize a run and flush backend state."""
-        for worker_id in ("stdout", "stderr"):
-            self._request("POST", f"{self._base_run_path()}/logs/flush", {"workerId": worker_id})
-        self._request("POST", f"{self._base_run_path()}/scalars/flush", {})
+        for worker_label in sorted(self._registered_workers):
+            self._request("POST", f"{self._base_run_path()}/logs/flush", {"workerLabel": worker_label})
+        self._request("POST", f"{self._base_run_path()}/scalars/flush", {"workerLabel": "0"})
         self._request("PUT", f"{self._base_run_path()}", {"status": "finished"})
