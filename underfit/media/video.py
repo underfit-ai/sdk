@@ -17,16 +17,6 @@ class Video:
     metadata used by the uploader and keeps a stable, inspectable payload shape
     for SDK consumers.
 
-    Args:
-        data_or_path: Video source as a path or raw bytes.
-        caption: Optional display caption.
-        fps: Playback frame rate in frames per second.
-        file_type: Optional file type hint like ``"mp4"`` or ``"webm"``.
-
-    Raises:
-        TypeError: If ``data_or_path`` is not a supported input type.
-        ValueError: If fps is not positive.
-
     Examples:
         >>> from underfit import Video
         >>> Video("./predictions/rollout.mp4", caption="rollout")
@@ -46,6 +36,18 @@ class Video:
         fps: int = 4,
         file_type: str | None = None,
     ) -> None:
+        """Initialize a video payload.
+
+        Args:
+            data_or_path: Video source as a path or raw bytes.
+            caption: Optional display caption.
+            fps: Playback frame rate in frames per second.
+            file_type: Optional file type hint like ``"mp4"`` or ``"webm"``.
+
+        Raises:
+            TypeError: If ``data_or_path`` is not a supported input type.
+            ValueError: If ``fps`` is not positive.
+        """
         if not isinstance(fps, int) or fps <= 0:
             raise ValueError("fps must be a positive integer")
 

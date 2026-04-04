@@ -17,17 +17,6 @@ class Image:
     metadata used by the uploader and keeps a stable, inspectable payload shape
     for SDK consumers.
 
-    Args:
-        data_or_path: Image source as a path or raw bytes.
-        caption: Optional display caption.
-        file_type: Optional file type hint like ``"png"`` or ``"jpeg"``.
-        width: Optional image width in pixels.
-        height: Optional image height in pixels.
-
-    Raises:
-        TypeError: If ``data_or_path`` is not a supported input type.
-        ValueError: If width or height are not positive when provided.
-
     Examples:
         >>> from underfit import Image
         >>> Image("./predictions/sample.png", caption="model output")
@@ -49,6 +38,19 @@ class Image:
         width: int | None = None,
         height: int | None = None,
     ) -> None:
+        """Initialize an image payload.
+
+        Args:
+            data_or_path: Image source as a path or raw bytes.
+            caption: Optional display caption.
+            file_type: Optional file type hint like ``"png"`` or ``"jpeg"``.
+            width: Optional image width in pixels.
+            height: Optional image height in pixels.
+
+        Raises:
+            TypeError: If ``data_or_path`` is not a supported input type.
+            ValueError: If width or height are not positive when provided.
+        """
         if width is not None and (not isinstance(width, int) or width <= 0):
             raise ValueError("width must be a positive integer")
         if height is not None and (not isinstance(height, int) or height <= 0):

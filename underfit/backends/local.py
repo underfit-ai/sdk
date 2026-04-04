@@ -43,6 +43,14 @@ class LocalBackend(Backend):
         run_config: dict[str, Any],
         root_dir: str | Path | None = None,
     ) -> None:
+        """Initialize a local filesystem backend.
+
+        Args:
+            project_name: Project name for the run.
+            run_name: Optional requested run name.
+            run_config: Run configuration payload.
+            root_dir: Root directory for local run data.
+        """
         self.project_name = project_name
         self._run_name = _slug(run_name) if run_name else _default_run_name()
         self.root_dir = Path(root_dir or Path.cwd() / "underfit")
@@ -64,15 +72,18 @@ class LocalBackend(Backend):
 
     @property
     def run_name(self) -> str:
+        """Return the normalized backend run name."""
         return self._run_name
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
+        """Append scalar metric values for a run."""
         if not values:
             return
         record = {"step": step, "values": values, "timestamp": _now_iso()}
         self._append_jsonl(self.run_dir / _SCALAR_FILE_NAME, record)
 
     def log_lines(self, worker_id: str, lines: list[str]) -> None:
+        """Append console log lines for a run."""
         if not lines:
             return
         log_path = self.run_dir / _LOG_FILE_NAME
@@ -80,6 +91,7 @@ class LocalBackend(Backend):
             self._append_jsonl(log_path, {"workerId": worker_id, "timestamp": _now_iso(), "content": line})
 
     def log_artifact(self, artifact: Any) -> None:
+        """Store an artifact for a run."""
         artifact_name = getattr(artifact, "name", None)
         if not isinstance(artifact_name, str) or not artifact_name:
             raise RuntimeError("Artifact is missing a valid name")
@@ -96,27 +108,32 @@ class LocalBackend(Backend):
             self._append_jsonl(self.run_dir / _ARTIFACT_FILE_NAME, record)
 
     def read_scalars(self) -> list[dict[str, Any]]:
+        """Return scalar records that were stored for a run."""
         return self._read_jsonl(self.run_dir / _SCALAR_FILE_NAME)
 
     def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
+        """Return log records, optionally filtered by worker id."""
         records = self._read_jsonl(self.run_dir / _LOG_FILE_NAME)
         if worker_id is None:
             return records
         return [record for record in records if record.get("workerId") == worker_id]
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
+        """Return stored artifact entries, optionally filtered by artifact name."""
         records = self._read_jsonl(self.run_dir / _ARTIFACT_FILE_NAME)
         if artifact_name is None:
             return records
         return [record for record in records if record.get("artifactName") == artifact_name]
 
     def finish(self) -> None:
+        """Finalize a run and flush backend state."""
         metadata = self._read_metadata()
         metadata["status"] = "finished"
         metadata["finishedAt"] = _now_iso()
         self._write_metadata(metadata)
 
     def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
+        """Append media files for a run under a shared key and step."""
         if not payloads:
             return
 

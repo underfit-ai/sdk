@@ -39,6 +39,18 @@ class APIBackend(Backend):
         run_name: str | None,
         run_config: dict[str, Any],
     ) -> None:
+        """Initialize an API-backed run transport.
+
+        Args:
+            api_url: Base Underfit API URL.
+            api_key: API token used for authentication.
+            project_name: Project name for the run.
+            run_name: Optional requested run name.
+            run_config: Run configuration payload.
+
+        Raises:
+            RuntimeError: If the API request to initialize the run fails.
+        """
         self.api_url = _normalize_api_url(api_url)
         self.api_key = api_key
         self.account_handle = self._resolve_account_handle()
@@ -51,6 +63,7 @@ class APIBackend(Backend):
 
     @property
     def run_name(self) -> str:
+        """Return the normalized backend run name."""
         if self._run_name is None:
             raise RuntimeError("Run name is not initialized")
         return self._run_name
@@ -207,6 +220,7 @@ class APIBackend(Backend):
         self._run_name = name.lower()
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
+        """Append scalar metric values for a run."""
         if not values:
             return
 
@@ -230,6 +244,7 @@ class APIBackend(Backend):
         raise RuntimeError("Failed to append scalars to Underfit API")
 
     def log_lines(self, worker_id: str, lines: list[str]) -> None:
+        """Append console log lines for a run."""
         if not lines:
             return
 
@@ -255,6 +270,7 @@ class APIBackend(Backend):
         raise RuntimeError("Failed to append logs to Underfit API")
 
     def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
+        """Append media files for a run under a shared key and step."""
         if not payloads:
             return
 
@@ -277,6 +293,7 @@ class APIBackend(Backend):
         self._request_multipart("POST", f"{self._base_run_path()}/media", body, boundary)
 
     def log_artifact(self, artifact: Any) -> None:
+        """Store an artifact for a run."""
         if self._run_id is None:
             raise RuntimeError("Run id is not initialized")
 
@@ -306,17 +323,21 @@ class APIBackend(Backend):
         raise RuntimeError("Artifact upload is missing file content")
 
     def read_scalars(self) -> list[dict[str, Any]]:
+        """Return scalar records that were stored for a run."""
         raise NotImplementedError("Reading scalars is not implemented for API backend")
 
     def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
+        """Return log records, optionally filtered by worker id."""
         _ = worker_id
         raise NotImplementedError("Reading logs is not implemented for API backend")
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
+        """Return stored artifact entries, optionally filtered by artifact name."""
         _ = artifact_name
         raise NotImplementedError("Reading artifact entries is not implemented for API backend")
 
     def finish(self) -> None:
+        """Finalize a run and flush backend state."""
         for worker_id in ("stdout", "stderr"):
             self._request("POST", f"{self._base_run_path()}/logs/flush", {"workerId": worker_id})
         self._request("POST", f"{self._base_run_path()}/scalars/flush", {})
