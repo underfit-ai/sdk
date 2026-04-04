@@ -5,10 +5,12 @@ from __future__ import annotations
 import base64
 import json
 import shutil
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from underfit.artifact import ArtifactDataUpload, ArtifactPathUpload, ArtifactUpload
 from underfit.backends.base import Backend
 
 _ARTIFACT_FILE_NAME = "artifacts.jsonl"
@@ -43,6 +45,14 @@ class LocalBackend(Backend):
         run_config: dict[str, Any],
         root_dir: str | Path | None = None,
     ) -> None:
+        """Initialize a local filesystem backend.
+
+        Args:
+            project_name: Project name for the run.
+            run_name: Optional requested run name.
+            run_config: Run configuration payload.
+            root_dir: Root directory for local run data.
+        """
         self.project_name = project_name
         self._run_name = _slug(run_name) if run_name else _default_run_name()
         self.root_dir = Path(root_dir or Path.cwd() / "underfit")
@@ -64,48 +74,68 @@ class LocalBackend(Backend):
 
     @property
     def run_name(self) -> str:
+        """Return the normalized backend run name."""
         return self._run_name
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
+        """Append scalar metric values for a run."""
         if not values:
             return
         record = {"step": step, "values": values, "timestamp": _now_iso()}
         self._append_jsonl(self.run_dir / _SCALAR_FILE_NAME, record)
 
     def log_lines(self, worker_id: str, lines: list[str]) -> None:
+        """Append console log lines for a run."""
         if not lines:
             return
         log_path = self.run_dir / _LOG_FILE_NAME
         for line in lines:
             self._append_jsonl(log_path, {"workerId": worker_id, "timestamp": _now_iso(), "content": line})
 
-    def upload_artifact_entry(self, artifact_name: str, entry: dict[str, Any]) -> None:
-        stored_entry = self._store_artifact_entry(artifact_name, entry)
-        record = {"artifactName": artifact_name, "entry": stored_entry}
-        self._append_jsonl(self.run_dir / _ARTIFACT_FILE_NAME, record)
+    def log_artifact(self, artifact: Any) -> None:
+        """Store an artifact for a run."""
+        artifact_name = getattr(artifact, "name", None)
+        if not isinstance(artifact_name, str) or not artifact_name:
+            raise RuntimeError("Artifact is missing a valid name")
+
+        for upload in artifact.uploads():
+            stored_entry = self._store_artifact_file(artifact_name, upload)
+            self._append_jsonl(
+                self.run_dir / _ARTIFACT_FILE_NAME,
+                {"artifactName": artifact_name, "entry": stored_entry},
+            )
+
+        for reference in artifact.manifest().references:
+            record = {"artifactName": artifact_name, "entry": {"kind": "reference", **asdict(reference)}}
+            self._append_jsonl(self.run_dir / _ARTIFACT_FILE_NAME, record)
 
     def read_scalars(self) -> list[dict[str, Any]]:
+        """Return scalar records that were stored for a run."""
         return self._read_jsonl(self.run_dir / _SCALAR_FILE_NAME)
 
     def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
+        """Return log records, optionally filtered by worker id."""
         records = self._read_jsonl(self.run_dir / _LOG_FILE_NAME)
         if worker_id is None:
             return records
         return [record for record in records if record.get("workerId") == worker_id]
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
+        """Return stored artifact entries, optionally filtered by artifact name."""
         records = self._read_jsonl(self.run_dir / _ARTIFACT_FILE_NAME)
         if artifact_name is None:
             return records
         return [record for record in records if record.get("artifactName") == artifact_name]
 
     def finish(self) -> None:
+        """Finalize a run and flush backend state."""
         metadata = self._read_metadata()
         metadata["status"] = "finished"
         metadata["finishedAt"] = _now_iso()
         self._write_metadata(metadata)
 
     def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
+        """Append media files for a run under a shared key and step."""
         if not payloads:
             return
 
@@ -133,47 +163,26 @@ class LocalBackend(Backend):
         }
         self._append_jsonl(self.run_dir / _MEDIA_FILE_NAME, record)
 
-    def _store_artifact_entry(self, artifact_name: str, entry: dict[str, Any]) -> dict[str, Any]:
+    def _store_artifact_file(self, artifact_name: str, upload: ArtifactUpload) -> dict[str, Any]:
         destination_root = self.artifact_dir / _slug(artifact_name)
         destination_root.mkdir(parents=True, exist_ok=True)
 
-        kind = entry.get("kind")
-        name = entry.get("name")
-        if not isinstance(kind, str) or not isinstance(name, str):
-            raise RuntimeError("Artifact entry is missing required kind/name fields")
+        artifact_path = upload.path
+        if not artifact_path:
+            raise RuntimeError("Artifact upload is missing a valid path")
 
-        destination = destination_root / name
+        destination = destination_root / artifact_path
         destination.parent.mkdir(parents=True, exist_ok=True)
-
-        if kind == "file":
-            source = Path(entry["path"])
+        if isinstance(upload, ArtifactPathUpload):
+            source = Path(upload.source_path)
             if not source.is_file():
                 raise FileNotFoundError(f"artifact source file does not exist: {source}")
             shutil.copy2(source, destination)
-            return {"kind": kind, "name": name, "path": str(destination)}
-
-        if kind == "directory":
-            source = Path(entry["path"])
-            if not source.is_dir():
-                raise FileNotFoundError(f"artifact source directory does not exist: {source}")
-            if destination.exists():
-                shutil.rmtree(destination)
-            shutil.copytree(source, destination)
-            return {"kind": kind, "name": name, "path": str(destination)}
-
-        if kind == "bytes":
-            data = base64.b64decode(entry["data"])
-            destination.write_bytes(data)
-            return {"kind": kind, "name": name, "path": str(destination)}
-
-        if kind == "media":
-            destination = destination.with_suffix(".json")
-            destination.write_text(json.dumps(entry["payload"], sort_keys=True), encoding="utf-8")
-            return {"kind": kind, "name": name, "path": str(destination)}
-
-        destination = destination.with_suffix(".json")
-        destination.write_text(json.dumps(entry, sort_keys=True), encoding="utf-8")
-        return {"kind": kind, "name": name, "path": str(destination)}
+        elif isinstance(upload, ArtifactDataUpload):
+            destination.write_bytes(base64.b64decode(upload.data))
+        else:
+            raise RuntimeError("Artifact upload is missing file content")
+        return {"kind": "file", "name": artifact_path, "path": str(destination)}
 
     @staticmethod
     def _extract_media_content(payload: dict[str, Any], key: str, index: int) -> tuple[str, bytes]:

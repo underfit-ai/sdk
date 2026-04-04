@@ -265,7 +265,7 @@ class Run:
         return artifact
 
     def log_artifact(self, artifact: Artifact) -> None:
-        """Upload an artifact's attached entries to the backend.
+        """Upload an artifact to the backend.
 
         Args:
             artifact: Artifact to upload.
@@ -278,8 +278,7 @@ class Run:
         if not isinstance(artifact, Artifact):
             raise TypeError("artifact must be an underfit.Artifact")
 
-        for entry in artifact.upload_manifest():
-            self.backend.upload_artifact_entry(artifact.name, entry)
+        self.backend.log_artifact(artifact)
 
     def finish(self) -> None:
         """Finalize the run."""

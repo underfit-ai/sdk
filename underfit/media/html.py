@@ -16,15 +16,6 @@ class Html:
     bytes. This class stores metadata used by the uploader and keeps a stable,
     inspectable payload shape for SDK consumers.
 
-    Args:
-        data_or_path: HTML markup, path, or UTF-8 encoded bytes.
-        caption: Optional display caption.
-        inject: Enable script/css injection for supported display contexts.
-
-    Raises:
-        TypeError: If ``data_or_path`` is not a supported input type.
-        ValueError: If ``data_or_path`` bytes cannot be decoded as UTF-8.
-
     Examples:
         >>> from underfit import Html
         >>> Html("<h1>Report</h1>", caption="summary")
@@ -36,6 +27,17 @@ class Html:
     inject: bool
 
     def __init__(self, data_or_path: HtmlLike, *, caption: str | None = None, inject: bool = True) -> None:
+        """Initialize an HTML payload.
+
+        Args:
+            data_or_path: HTML markup, path, or UTF-8 encoded bytes.
+            caption: Optional display caption.
+            inject: Enable script and style injection for supported display contexts.
+
+        Raises:
+            TypeError: If ``data_or_path`` is not a supported input type.
+            ValueError: If ``data_or_path`` bytes cannot be decoded as UTF-8.
+        """
         path: Path | None = None
         html: str | None = None
 

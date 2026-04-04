@@ -16,16 +16,6 @@ class Audio:
     The audio source can be a filesystem path or raw bytes. This class stores
     metadata used by the uploader and keeps a stable, inspectable payload shape
     for SDK consumers.
-
-    Args:
-        data_or_path: Audio source as a path or raw bytes.
-        caption: Optional display caption.
-        sample_rate: Optional sample rate in Hertz.
-        file_type: Optional file type hint like ``"wav"`` or ``"mp3"``.
-
-    Raises:
-        TypeError: If ``data_or_path`` is not a supported input type.
-        ValueError: If ``sample_rate`` is invalid.
     """
 
     path: Path | None
@@ -42,6 +32,18 @@ class Audio:
         sample_rate: int | None = None,
         file_type: str | None = None,
     ) -> None:
+        """Initialize an audio payload.
+
+        Args:
+            data_or_path: Audio source as a path or raw bytes.
+            caption: Optional display caption.
+            sample_rate: Optional sample rate in Hertz.
+            file_type: Optional file type hint like ``"wav"`` or ``"mp3"``.
+
+        Raises:
+            TypeError: If ``data_or_path`` is not a supported input type.
+            ValueError: If ``sample_rate`` is invalid or bytes are missing a file type.
+        """
         if sample_rate is not None and (not isinstance(sample_rate, int) or sample_rate <= 0):
             raise ValueError("sample_rate must be a positive integer")
 
