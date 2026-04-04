@@ -10,10 +10,6 @@ classifiers = ["Programming Language :: Python :: 3"]
 license = "MIT"
 license-files = ["LICENSE"]
 
-[build-system]
-requires = ["setuptools>=45", "wheel"]
-build-backend = "setuptools.build_meta"
-
 dependencies = []
 
 [project.optional-dependencies]
@@ -22,6 +18,10 @@ testing = [
     "ty",
     "pytest",
 ]
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.package-data]
 "underfit" = ["py.typed"]
