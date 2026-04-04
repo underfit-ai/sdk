@@ -24,7 +24,7 @@ class _RecordingBackend(Backend):
     def __init__(self) -> None:
         self.scalar_calls: list[tuple[dict[str, float], int | None]] = []
         self.media_calls: list[tuple[str, int | None, list[dict[str, Any]]]] = []
-        self.artifact_calls: list[tuple[str, dict[str, Any]]] = []
+        self.artifact_calls: list[Artifact] = []
         self.finish_calls = 0
         self.scalars_result = [{"step": 1, "values": {"loss": 0.5}}]
         self.logs_result = [{"workerId": "stdout", "content": "hello"}]
@@ -43,8 +43,10 @@ class _RecordingBackend(Backend):
     def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
         self.media_calls.append((key, step, payloads))
 
-    def upload_artifact_entry(self, artifact_name: str, entry: dict[str, Any]) -> None:
-        self.artifact_calls.append((artifact_name, entry))
+    def log_artifact(self, artifact: Any) -> None:
+        if not isinstance(artifact, Artifact):
+            raise TypeError("artifact must be an underfit.Artifact")
+        self.artifact_calls.append(artifact)
 
     def read_scalars(self) -> list[dict[str, Any]]:
         return self.scalars_result
@@ -124,11 +126,11 @@ def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
     )
 
     assert artifact.name == "source-code"
-    assert [name for name, _entry in backend.artifact_calls] == ["source-code"]
-    assert backend.artifact_calls[0][1]["name"] == "source-code.zip"
-    assert backend.artifact_calls[0][1]["kind"] == "bytes"
+    assert [logged.name for logged in backend.artifact_calls] == ["source-code"]
+    uploads = backend.artifact_calls[0].upload_files()
+    assert uploads[0]["path"] == "source-code.zip"
 
-    archive_bytes = base64.b64decode(backend.artifact_calls[0][1]["data"])
+    archive_bytes = base64.b64decode(uploads[0]["data"])
     with ZipFile(BytesIO(archive_bytes)) as archive:
         assert archive.namelist() == ["keep.py"]
         assert archive.read("keep.py") == b"print('keep')\n"
@@ -173,10 +175,10 @@ def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: p
         "is_dirty": True,
         "untracked_files": ["new.py"],
     }
-    assert [name for name, _entry in backend.artifact_calls] == ["git-state"]
-    assert backend.artifact_calls[0][1]["name"] == "working-tree.patch"
-    assert backend.artifact_calls[0][1]["kind"] == "bytes"
-    assert base64.b64decode(backend.artifact_calls[0][1]["data"]) == tracked_patch
+    assert [logged.name for logged in backend.artifact_calls] == ["git-state"]
+    uploads = backend.artifact_calls[0].upload_files()
+    assert uploads[0]["path"] == "working-tree.patch"
+    assert base64.b64decode(uploads[0]["data"]) == tracked_patch
 
 
 def test_finish_is_idempotent_and_blocks_future_writes() -> None:

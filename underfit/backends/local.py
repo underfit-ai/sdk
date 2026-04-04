@@ -79,10 +79,21 @@ class LocalBackend(Backend):
         for line in lines:
             self._append_jsonl(log_path, {"workerId": worker_id, "timestamp": _now_iso(), "content": line})
 
-    def upload_artifact_entry(self, artifact_name: str, entry: dict[str, Any]) -> None:
-        stored_entry = self._store_artifact_entry(artifact_name, entry)
-        record = {"artifactName": artifact_name, "entry": stored_entry}
-        self._append_jsonl(self.run_dir / _ARTIFACT_FILE_NAME, record)
+    def log_artifact(self, artifact: Any) -> None:
+        artifact_name = getattr(artifact, "name", None)
+        if not isinstance(artifact_name, str) or not artifact_name:
+            raise RuntimeError("Artifact is missing a valid name")
+
+        for upload in artifact.upload_files():
+            stored_entry = self._store_artifact_file(artifact_name, upload)
+            self._append_jsonl(
+                self.run_dir / _ARTIFACT_FILE_NAME,
+                {"artifactName": artifact_name, "entry": stored_entry},
+            )
+
+        for reference in artifact.finalize_manifest().get("references", []):
+            record = {"artifactName": artifact_name, "entry": {"kind": "reference", **reference}}
+            self._append_jsonl(self.run_dir / _ARTIFACT_FILE_NAME, record)
 
     def read_scalars(self) -> list[dict[str, Any]]:
         return self._read_jsonl(self.run_dir / _SCALAR_FILE_NAME)
@@ -133,47 +144,26 @@ class LocalBackend(Backend):
         }
         self._append_jsonl(self.run_dir / _MEDIA_FILE_NAME, record)
 
-    def _store_artifact_entry(self, artifact_name: str, entry: dict[str, Any]) -> dict[str, Any]:
+    def _store_artifact_file(self, artifact_name: str, upload: dict[str, Any]) -> dict[str, Any]:
         destination_root = self.artifact_dir / _slug(artifact_name)
         destination_root.mkdir(parents=True, exist_ok=True)
 
-        kind = entry.get("kind")
-        name = entry.get("name")
-        if not isinstance(kind, str) or not isinstance(name, str):
-            raise RuntimeError("Artifact entry is missing required kind/name fields")
+        artifact_path = upload.get("path")
+        if not isinstance(artifact_path, str) or not artifact_path:
+            raise RuntimeError("Artifact upload is missing a valid path")
 
-        destination = destination_root / name
+        destination = destination_root / artifact_path
         destination.parent.mkdir(parents=True, exist_ok=True)
-
-        if kind == "file":
-            source = Path(entry["path"])
+        if source_path := upload.get("source_path"):
+            source = Path(source_path)
             if not source.is_file():
                 raise FileNotFoundError(f"artifact source file does not exist: {source}")
             shutil.copy2(source, destination)
-            return {"kind": kind, "name": name, "path": str(destination)}
-
-        if kind == "directory":
-            source = Path(entry["path"])
-            if not source.is_dir():
-                raise FileNotFoundError(f"artifact source directory does not exist: {source}")
-            if destination.exists():
-                shutil.rmtree(destination)
-            shutil.copytree(source, destination)
-            return {"kind": kind, "name": name, "path": str(destination)}
-
-        if kind == "bytes":
-            data = base64.b64decode(entry["data"])
-            destination.write_bytes(data)
-            return {"kind": kind, "name": name, "path": str(destination)}
-
-        if kind == "media":
-            destination = destination.with_suffix(".json")
-            destination.write_text(json.dumps(entry["payload"], sort_keys=True), encoding="utf-8")
-            return {"kind": kind, "name": name, "path": str(destination)}
-
-        destination = destination.with_suffix(".json")
-        destination.write_text(json.dumps(entry, sort_keys=True), encoding="utf-8")
-        return {"kind": kind, "name": name, "path": str(destination)}
+        elif data := upload.get("data"):
+            destination.write_bytes(base64.b64decode(data))
+        else:
+            raise RuntimeError("Artifact upload is missing file content")
+        return {"kind": "file", "name": artifact_path, "path": str(destination)}
 
     @staticmethod
     def _extract_media_content(payload: dict[str, Any], key: str, index: int) -> tuple[str, bytes]:

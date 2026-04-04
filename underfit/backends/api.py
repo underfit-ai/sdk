@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timezone
@@ -43,6 +44,7 @@ class APIBackend(Backend):
         self.account_handle = self._resolve_account_handle()
         self.project_name = project_name.lower()
         self.scalar_line = 0
+        self._run_id: str | None = None
         self._run_name = run_name.lower() if run_name else None
         self._log_line_offsets: dict[str, int] = {"stdout": 0, "stderr": 0}
         self._create_run(run_config)
@@ -92,6 +94,35 @@ class APIBackend(Backend):
             with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
                 body_text = response.read().decode("utf-8")
                 return {} if not body_text else json.loads(body_text)
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8")
+            details = error_body
+            if error_body:
+                try:
+                    details = json.dumps(json.loads(error_body), sort_keys=True)
+                except json.JSONDecodeError:
+                    details = error_body
+            raise RuntimeError(f"Underfit request failed ({e.code} {method} {path}): {details}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Underfit request failed ({method} {path}): {e.reason}") from e
+
+    def _request_bytes(
+        self,
+        method: str,
+        path: str,
+        body: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> dict[str, Any]:
+        request = urllib.request.Request(  # noqa: S310
+            url=f"{self.api_url}{path}",
+            data=body,
+            method=method,
+            headers={"Content-Type": content_type, "Authorization": f"Bearer {self.api_key}"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+                response_body = response.read().decode("utf-8")
+                return {} if not response_body else json.loads(response_body)
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8")
             details = error_body
@@ -166,9 +197,13 @@ class APIBackend(Backend):
             f"/accounts/{self.account_handle}/projects/{self.project_name}/runs",
             {"status": "running", "config": run_config or None},
         )
+        run_id = response.get("id")
         name = response.get("name")
+        if not isinstance(run_id, str) or not run_id:
+            raise RuntimeError("Underfit run creation response did not include a run id")
         if not isinstance(name, str) or not name:
             raise RuntimeError("Underfit run creation response did not include a run name")
+        self._run_id = run_id
         self._run_name = name.lower()
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
@@ -241,31 +276,34 @@ class APIBackend(Backend):
         body, boundary = self._encode_multipart(files, metadata_payload)
         self._request_multipart("POST", f"{self._base_run_path()}/media", body, boundary)
 
-    def upload_artifact_entry(self, artifact_name: str, entry: dict[str, Any]) -> None:
-        _ = artifact_name
-        kind = entry.get("kind")
-        if kind != "media":
-            # Other artifact kinds are not yet supported by the API backend.
-            return
+    def log_artifact(self, artifact: Any) -> None:
+        if self._run_id is None:
+            raise RuntimeError("Run id is not initialized")
 
-        payload = entry.get("payload") or {}
-        if not isinstance(payload, dict):
-            raise RuntimeError("media payload is missing or invalid")
+        created = self._request(
+            "POST",
+            f"/accounts/{self.account_handle}/projects/{self.project_name}/artifacts",
+            {"run_id": self._run_id, **artifact.create_payload()},
+        )
+        artifact_id = created.get("id")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise RuntimeError("Underfit artifact creation response did not include an id")
 
-        media_type = payload.get("_type")
-        if media_type not in {"image", "video", "audio", "html"}:
-            raise RuntimeError(f"unsupported media type: {media_type}")
+        for upload in artifact.upload_files():
+            artifact_path = upload.get("path")
+            if not isinstance(artifact_path, str) or not artifact_path:
+                raise RuntimeError("Artifact upload is missing a valid path")
+            path = f"/artifacts/{artifact_id}/files/{urllib.parse.quote(artifact_path, safe='/')}"
+            self._request_bytes("PUT", path, self._artifact_bytes(upload))
 
-        name = entry.get("name") or "media"
-        files = [self._build_media_file(name, payload)]
-        excluded = {"_type", "path", "data", "html"}
-        metadata: dict[str, Any] = {
-            key: value for key, value in payload.items() if key not in excluded and value is not None
-        }
-        metadata_payload = {"key": name, "step": None, "type": media_type, "metadata": metadata or None}
+        self._request("POST", f"/artifacts/{artifact_id}/finalize", {"manifest": artifact.finalize_manifest()})
 
-        body, boundary = self._encode_multipart(files, metadata_payload)
-        self._request_multipart("POST", f"{self._base_run_path()}/media", body, boundary)
+    def _artifact_bytes(self, upload: dict[str, Any]) -> bytes:
+        if source_path := upload.get("source_path"):
+            return Path(source_path).read_bytes()
+        if data := upload.get("data"):
+            return base64.b64decode(data)
+        raise RuntimeError("Artifact upload is missing file content")
 
     def read_scalars(self) -> list[dict[str, Any]]:
         raise NotImplementedError("Reading scalars is not implemented for API backend")
