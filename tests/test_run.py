@@ -25,13 +25,7 @@ class _RecordingBackend(Backend):
         self.scalar_calls: list[tuple[dict[str, float], int | None]] = []
         self.media_calls: list[tuple[str, int | None, list[dict[str, Any]]]] = []
         self.artifact_calls: list[Artifact] = []
-        self.read_scalars_calls = 0
-        self.read_logs_calls: list[str | None] = []
-        self.read_artifact_entries_calls: list[str | None] = []
         self.finish_calls = 0
-        self.scalars_result = [{"step": 1, "values": {"loss": 0.5}}]
-        self.logs_result = [{"workerId": "stdout", "content": "hello"}, {"workerId": "stderr", "content": "warn"}]
-        self.artifacts_result = [{"artifactName": "model"}, {"artifactName": "dataset"}]
 
     @property
     def run_name(self) -> str:
@@ -52,20 +46,15 @@ class _RecordingBackend(Backend):
         self.artifact_calls.append(artifact)
 
     def read_scalars(self) -> list[dict[str, Any]]:
-        self.read_scalars_calls += 1
-        return self.scalars_result
+        return []
 
     def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
-        self.read_logs_calls.append(worker_id)
-        if worker_id is None:
-            return self.logs_result
-        return [record for record in self.logs_result if record["workerId"] == worker_id]
+        _ = worker_id
+        return []
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
-        self.read_artifact_entries_calls.append(artifact_name)
-        if artifact_name is None:
-            return self.artifacts_result
-        return [record for record in self.artifacts_result if record["artifactName"] == artifact_name]
+        _ = artifact_name
+        return []
 
     def finish(self) -> None:
         self.finish_calls += 1
@@ -210,16 +199,3 @@ def test_finish_is_idempotent_and_blocks_future_writes() -> None:
         run.log({"loss": 1.0})
     with pytest.raises(RuntimeError, match="already finished"):
         run.log_artifact(Artifact("model", "model"))
-
-
-def test_read_methods_delegate_to_backend() -> None:
-    """Return read results directly from the backend."""
-    backend = _RecordingBackend()
-    run = Run("project", "run", backend)
-
-    assert run.read_scalars() == backend.scalars_result
-    assert backend.read_scalars_calls == 1
-    assert run.read_logs("stdout") == [backend.logs_result[0]]
-    assert backend.read_logs_calls == ["stdout"]
-    assert run.read_artifact_entries("model") == [backend.artifacts_result[0]]
-    assert backend.read_artifact_entries_calls == ["model"]

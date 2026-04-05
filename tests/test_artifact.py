@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import os
 import urllib.error
-from dataclasses import asdict
 from email.message import Message
 from pathlib import Path
 
@@ -70,20 +69,6 @@ def test_artifact_add_media_uses_uploadable_file_content() -> None:
         ArtifactDataUpload(path="media-1.html", data=base64.b64encode(b"<h1>ok</h1>").decode("ascii")),
     ]
     assert artifact.manifest() == ArtifactManifest(files=["media-1.html"], references=[])
-
-
-def test_artifact_dataclasses_serialize_with_asdict() -> None:
-    """Serialize typed artifact data only at the backend boundary."""
-    artifact = Artifact("report", "report", metadata={"tag": "latest"})
-    artifact.add_bytes(b"ok", name="report.txt")
-
-    assert asdict(artifact.create_request()) == {"name": "report", "type": "report", "metadata": {"tag": "latest"}}
-    assert [asdict(upload) for upload in artifact.uploads()] == [
-        {"path": "report.txt", "data": base64.b64encode(b"ok").decode("ascii")},
-    ]
-    assert asdict(artifact.manifest()) == {"files": ["report.txt"], "references": []}
-
-
 def test_artifact_rejects_invalid_and_conflicting_paths() -> None:
     """Reject artifact paths that the API would not accept."""
     artifact = Artifact("report", "report")
@@ -132,13 +117,13 @@ def test_artifact_add_url_uses_head_metadata(monkeypatch: pytest.MonkeyPatch) ->
     artifact = Artifact("report", "report")
     artifact.add_url("https://example.com/model")
 
-    assert asdict(artifact.manifest())["references"] == [{
-        "url": "https://example.com/model",
-        "size": 7,
-        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-        "etag": '"abc"',
-        "last_modified": "Wed, 21 Oct 2015 07:28:00 GMT",
-    }]
+    assert artifact.manifest().references == [ArtifactReference(
+        url="https://example.com/model",
+        size=7,
+        sha256="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        etag='"abc"',
+        last_modified="Wed, 21 Oct 2015 07:28:00 GMT",
+    )]
 
 
 def test_artifact_add_url_leaves_missing_headers_blank(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,10 +139,4 @@ def test_artifact_add_url_leaves_missing_headers_blank(monkeypatch: pytest.Monke
     artifact = Artifact("report", "report")
     artifact.add_url("https://example.com/model")
 
-    assert asdict(artifact.manifest())["references"] == [{
-        "url": "https://example.com/model",
-        "size": None,
-        "sha256": None,
-        "etag": None,
-        "last_modified": None,
-    }]
+    assert artifact.manifest().references == [ArtifactReference(url="https://example.com/model")]

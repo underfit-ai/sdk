@@ -208,10 +208,13 @@ class APIBackend(Backend):
         return f"/accounts/{self.account_handle}/projects/{self.project_name}/runs/{self.run_name}"
 
     def _create_run(self, run_config: dict[str, Any]) -> None:
+        payload = {"workerLabel": "0", "status": "running", "config": run_config or None}
+        if self._run_name is not None:
+            payload["name"] = self._run_name
         response = self._request(
             "POST",
             f"/accounts/{self.account_handle}/projects/{self.project_name}/runs",
-            {"workerLabel": "0", "status": "running", "config": run_config or None},
+            payload,
         )
         run_id = response.get("id") if isinstance(response, dict) else None
         name = response.get("name") if isinstance(response, dict) else None

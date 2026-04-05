@@ -81,7 +81,7 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
 
 
 def test_api_backend_matches_worker_label_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Use the current workerLabel payloads and retry start-line conflicts."""
+    """Use the current workerLabel payloads, pass through custom run names, and retry start-line conflicts."""
     calls: list[tuple[str, str, object | None]] = []
 
     class _Response:
@@ -114,9 +114,9 @@ def test_api_backend_matches_worker_label_contract(monkeypatch: pytest.MonkeyPat
         if url.endswith("/api/v1/me"):
             return _Response({"handle": "owner"})
         if url.endswith("/api/v1/accounts/owner/projects/vision/runs"):
-            assert payload == {"workerLabel": "0", "status": "running", "config": {"lr": 0.1}}
-            return _Response({"id": "run-123", "name": "Server-Run"})
-        if url.endswith(("/Server-Run/scalars", "/server-run/scalars")):
+            assert payload == {"name": "baseline-run", "workerLabel": "0", "status": "running", "config": {"lr": 0.1}}
+            return _Response({"id": "run-123", "name": "baseline-run"})
+        if url.endswith("/baseline-run/scalars"):
             assert payload is not None
             assert "workerId" not in payload
             if payload["startLine"] == 0:
@@ -124,7 +124,7 @@ def test_api_backend_matches_worker_label_contract(monkeypatch: pytest.MonkeyPat
             assert payload["workerLabel"] == "0"
             assert payload["startLine"] == 3
             return _Response({"status": "buffered"})
-        if url.endswith("/server-run/workers"):
+        if url.endswith("/baseline-run/workers"):
             assert payload == {"workerLabel": "worker-1", "status": "running"}
             return _Response({
                 "id": "worker-1-id",
@@ -134,25 +134,25 @@ def test_api_backend_matches_worker_label_contract(monkeypatch: pytest.MonkeyPat
                 "status": "running",
                 "joinedAt": "2025-01-01T00:00:00Z",
             })
-        if url.endswith("/server-run/logs"):
+        if url.endswith("/baseline-run/logs"):
             assert payload is not None
             assert payload["workerLabel"] == "worker-1"
             assert "workerId" not in payload
             return _Response({"status": "buffered"})
-        if url.endswith("/server-run/logs/flush"):
+        if url.endswith("/baseline-run/logs/flush"):
             assert payload is not None
             assert payload["workerLabel"] in {"0", "worker-1"}
             assert "workerId" not in payload
             return _Response({"status": "flushed"})
-        if url.endswith("/server-run/scalars/flush"):
+        if url.endswith("/baseline-run/scalars/flush"):
             assert payload == {"workerLabel": "0"}
             return _Response({"status": "flushed"})
-        if url.endswith("/server-run"):
+        if url.endswith("/baseline-run"):
             assert method == "PUT"
             assert payload == {"status": "finished"}
             return _Response({
                 "id": "run-123",
-                "name": "server-run",
+                "name": "baseline-run",
                 "status": "finished",
                 "config": {"lr": 0.1},
             })
@@ -164,7 +164,7 @@ def test_api_backend_matches_worker_label_contract(monkeypatch: pytest.MonkeyPat
         api_url="https://underfit.example",
         api_key="secret",
         project_name="Vision",
-        run_name=None,
+        run_name="BASELINE-RUN",
         run_config={"lr": 0.1},
     )
 
@@ -172,7 +172,7 @@ def test_api_backend_matches_worker_label_contract(monkeypatch: pytest.MonkeyPat
     backend.log_lines("worker-1", ["hello"])
     backend.finish()
 
-    assert backend.run_name == "server-run"
+    assert backend.run_name == "baseline-run"
     assert backend.scalar_line == 4
     assert backend._log_line_offsets == {"worker-1": 1}  # noqa: SLF001
     assert all("workerId" not in json.dumps(payload) for _, _, payload in calls if payload is not None)
