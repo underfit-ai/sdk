@@ -15,7 +15,7 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     backend = LocalBackend(project_name="Vision", run_name="Trial A", run_config={"lr": 0.01}, root_dir=tmp_path)
 
     backend.log_scalars({"loss": 0.8}, step=1)
-    backend.log_lines("worker-1", ["hello", "world\n"])
+    backend.log_lines(["hello", "world\n"])
 
     artifact = Artifact("dataset-v1", "dataset", metadata={"format": "json"})
     artifact.add_bytes(b"{}", name="payload.json")
@@ -36,12 +36,9 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     assert scalar_lines == [{"step": 1, "values": {"loss": 0.8}, "timestamp": scalar_lines[0]["timestamp"]}]
     assert backend.read_scalars() == scalar_lines
 
-    log_path = backend.run_dir / "logs" / "worker-1.log"
+    log_path = backend.run_dir / "logs" / "log.log"
     assert log_path.read_text() == "hello\nworld\n"
-    assert backend.read_logs("worker-1") == [
-        {"workerId": "worker-1", "content": "hello"},
-        {"workerId": "worker-1", "content": "world"},
-    ]
+    assert backend.read_logs() == [{"content": "hello"}, {"content": "world"}]
 
     artifact_dirs = [path for path in (backend.run_dir / "artifacts").iterdir() if path.is_dir()]
     assert len(artifact_dirs) == 1

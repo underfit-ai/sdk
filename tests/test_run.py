@@ -34,8 +34,8 @@ class _RecordingBackend(Backend):
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
         self.scalar_calls.append((values, step))
 
-    def log_lines(self, worker_id: str, lines: list[str]) -> None:
-        _ = (worker_id, lines)
+    def log_lines(self, lines: list[str]) -> None:
+        _ = lines
 
     def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
         self.media_calls.append((key, step, payloads))
@@ -48,8 +48,7 @@ class _RecordingBackend(Backend):
     def read_scalars(self) -> list[dict[str, Any]]:
         return []
 
-    def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
-        _ = worker_id
+    def read_logs(self) -> list[dict[str, Any]]:
         return []
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:

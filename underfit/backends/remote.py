@@ -22,6 +22,13 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _require_str(response: Any, field: str, context: str) -> str:
+    value = response.get(field) if isinstance(response, dict) else None
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"Underfit {context} response did not include {field}")
+    return value
+
+
 def _normalize_api_url(url: str) -> str:
     normalized = url.strip().rstrip("/")
     return normalized if normalized.endswith("/api/v1") else f"{normalized}/api/v1"
@@ -69,19 +76,17 @@ class RemoteBackend(Backend):
         self.api_key = api_key
         self.account_handle = self._resolve_account_handle()
         self.project_name = project_name.lower()
-        self.worker_label = worker_label
-        self.scalar_line = 0
         self._run_id: str | None = None
         self._run_name = run_name.lower() if run_name else None
         self._is_primary = run_id is None
-        self._registered_workers: set[str] = set()
-        self._log_line_offsets: dict[str, int] = {}
+        self._worker_label = worker_label
+        self._worker_token: str | None = None
+        self.scalar_line = 0
+        self.log_line = 0
         if run_id is None:
-            self._create_run(run_config)
-            self._registered_workers.add(worker_label)
+            self._create_run(run_config, worker_label)
         else:
-            self._attach_to_run(run_id)
-            self._ensure_worker(worker_label)
+            self._attach_to_run(run_id, worker_label)
 
     @property
     def run_name(self) -> str:
@@ -90,15 +95,25 @@ class RemoteBackend(Backend):
             raise RuntimeError("Run name is not initialized")
         return self._run_name
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+    def _request(
+        self, method: str, path: str, payload: dict[str, Any] | None = None, *, token: str | None = None,
+    ) -> Any:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(  # noqa: S310
             url=f"{self.api_url}{path}",
             data=data,
             method=method,
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token or self.api_key}"},
         )
         return self._send_request(request, method, path, timeout=10)
+
+    def _ingest(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._worker_token is None:
+            raise RuntimeError("Worker token is not initialized")
+        response = self._request("POST", path, payload, token=self._worker_token)
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Underfit request returned an unexpected response type for POST {path}")
+        return response
 
     def _request_multipart(self, method: str, path: str, body: bytes, boundary: str) -> dict[str, Any]:
         request = urllib.request.Request(  # noqa: S310
@@ -220,8 +235,8 @@ class RemoteBackend(Backend):
     def _base_run_path(self) -> str:
         return f"/accounts/{self.account_handle}/projects/{self.project_name}/runs/{self.run_name}"
 
-    def _create_run(self, run_config: dict[str, Any]) -> None:
-        payload: dict[str, Any] = {"workerLabel": self.worker_label, "status": "running", "config": run_config or None}
+    def _create_run(self, run_config: dict[str, Any], worker_label: str) -> None:
+        payload: dict[str, Any] = {"workerLabel": worker_label, "status": "running", "config": run_config or None}
         if self._run_name is not None:
             payload["name"] = self._run_name
         response = self._request(
@@ -229,91 +244,48 @@ class RemoteBackend(Backend):
             f"/accounts/{self.account_handle}/projects/{self.project_name}/runs",
             payload,
         )
-        run_id = response.get("id") if isinstance(response, dict) else None
-        name = response.get("name") if isinstance(response, dict) else None
-        if not isinstance(run_id, str) or not run_id:
-            raise RuntimeError("Underfit run creation response did not include a run id")
-        if not isinstance(name, str) or not name:
-            raise RuntimeError("Underfit run creation response did not include a run name")
-        self._run_id = run_id
-        self._run_name = name.lower()
+        self._run_id = _require_str(response, "id", "run creation")
+        self._run_name = _require_str(response, "name", "run creation").lower()
+        self._worker_token = _require_str(response, "workerToken", "run creation")
 
-    def _attach_to_run(self, run_id: str) -> None:
+    def _attach_to_run(self, run_id: str, worker_label: str) -> None:
         self._run_name = run_id.lower()
-        response = self._request("GET", self._base_run_path())
-        resolved_id = response.get("id") if isinstance(response, dict) else None
-        resolved_name = response.get("name") if isinstance(response, dict) else None
-        if not isinstance(resolved_id, str) or not resolved_id:
-            raise RuntimeError("Underfit run lookup response did not include a run id")
-        if not isinstance(resolved_name, str) or not resolved_name:
-            raise RuntimeError("Underfit run lookup response did not include a run name")
-        self._run_id = resolved_id
-        self._run_name = resolved_name.lower()
-    def _ensure_worker(self, worker_label: str) -> None:
-        if worker_label in self._registered_workers:
-            return
-        try:
-            self._request(
-                "POST",
-                f"{self._base_run_path()}/workers",
-                {"workerLabel": worker_label, "status": "running"},
-            )
-        except _RequestError as e:
-            if e.status_code != 409:
-                raise
-        self._registered_workers.add(worker_label)
+        run_response = self._request("GET", self._base_run_path())
+        self._run_id = _require_str(run_response, "id", "run lookup")
+        self._run_name = _require_str(run_response, "name", "run lookup").lower()
+        worker_response = self._request(
+            "POST",
+            f"{self._base_run_path()}/workers",
+            {"workerLabel": worker_label, "status": "running"},
+        )
+        self._worker_token = _require_str(worker_response, "workerToken", "worker creation")
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
         """Append scalar metric values for a run."""
         if not values:
             return
+        scalars = [{"step": step, "values": values, "timestamp": _now_iso()}]
+        self.scalar_line = self._ingest_idempotent("/ingest/scalars", "scalars", scalars, self.scalar_line)
 
-        payload = {
-            "workerLabel": self.worker_label,
-            "startLine": self.scalar_line,
-            "scalars": [{"step": step, "values": values, "timestamp": _now_iso()}],
-        }
-        try:
-            response = self._request("POST", f"{self._base_run_path()}/scalars", payload)
-        except _RequestError as e:
-            expected = self._expected_start_line(e)
-            if e.status_code != 409 or expected is None:
-                raise
-            payload["startLine"] = expected
-            response = self._request("POST", f"{self._base_run_path()}/scalars", payload)
-            self.scalar_line = expected + len(payload["scalars"])
-        else:
-            self.scalar_line += len(payload["scalars"])
-
-        if not isinstance(response, dict) or response.get("status") != "buffered":
-            raise RuntimeError("Failed to append scalars to Underfit API")
-
-    def log_lines(self, worker_id: str, lines: list[str]) -> None:
-        """Append console log lines for a run."""
+    def log_lines(self, lines: list[str]) -> None:
+        """Append console log lines for the run's worker."""
         if not lines:
             return
+        entries = [{"timestamp": _now_iso(), "content": line} for line in lines]
+        self.log_line = self._ingest_idempotent("/ingest/logs", "lines", entries, self.log_line)
 
-        self._ensure_worker(worker_id)
-        start_line = self._log_line_offsets.get(worker_id, 0)
-        payload = {
-            "workerLabel": worker_id,
-            "startLine": start_line,
-            "lines": [{"timestamp": _now_iso(), "content": line} for line in lines],
-        }
+    def _ingest_idempotent(self, path: str, field: str, items: list[dict[str, Any]], start_line: int) -> int:
+        payload = {"startLine": start_line, field: items}
         try:
-            response = self._request("POST", f"{self._base_run_path()}/logs", payload)
+            self._ingest(path, payload)
         except _RequestError as e:
             expected = self._expected_start_line(e)
             if e.status_code != 409 or expected is None:
                 raise
             payload["startLine"] = expected
-            response = self._request("POST", f"{self._base_run_path()}/logs", payload)
-            self._log_line_offsets[worker_id] = expected + len(lines)
-        else:
-            self._log_line_offsets[worker_id] = start_line + len(lines)
-
-        if not isinstance(response, dict) or response.get("status") != "buffered":
-            raise RuntimeError("Failed to append logs to Underfit API")
+            self._ingest(path, payload)
+            return expected + len(items)
+        return start_line + len(items)
 
     def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
         """Append media files for a run under a shared key and step."""
@@ -371,9 +343,8 @@ class RemoteBackend(Backend):
         """Return scalar records that were stored for a run."""
         raise NotImplementedError("Reading scalars is not implemented for the remote backend")
 
-    def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
-        """Return log records, optionally filtered by worker id."""
-        _ = worker_id
+    def read_logs(self) -> list[dict[str, Any]]:
+        """Return log records for the run's worker."""
         raise NotImplementedError("Reading logs is not implemented for the remote backend")
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
@@ -382,15 +353,8 @@ class RemoteBackend(Backend):
         raise NotImplementedError("Reading artifact entries is not implemented for the remote backend")
 
     def finish(self) -> None:
-        """Finalize a run and flush backend state."""
-        for worker_label in sorted(self._registered_workers):
-            self._request("POST", f"{self._base_run_path()}/logs/flush", {"workerLabel": worker_label})
-        self._request("POST", f"{self._base_run_path()}/scalars/flush", {"workerLabel": self.worker_label})
+        """Finalize a run and mark the worker or run as finished."""
         if self._is_primary:
-            self._request("PUT", f"{self._base_run_path()}", {"status": "finished"})
+            self._request("PUT", self._base_run_path(), {"status": "finished"})
         else:
-            self._request(
-                "PUT",
-                f"{self._base_run_path()}/workers/{self.worker_label}",
-                {"status": "finished"},
-            )
+            self._request("PUT", f"{self._base_run_path()}/workers/{self._worker_label}", {"status": "finished"})

@@ -19,8 +19,8 @@ class Backend(ABC):
         """Append scalar metric values for a run."""
 
     @abstractmethod
-    def log_lines(self, worker_id: str, lines: list[str]) -> None:
-        """Append console log lines for a run."""
+    def log_lines(self, lines: list[str]) -> None:
+        """Append console log lines for the run's worker."""
 
     @abstractmethod
     def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
@@ -35,8 +35,8 @@ class Backend(ABC):
         """Return scalar records that were stored for a run."""
 
     @abstractmethod
-    def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
-        """Return log records, optionally filtered by worker id."""
+    def read_logs(self) -> list[dict[str, Any]]:
+        """Return log records for the run's worker."""
 
     @abstractmethod
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:

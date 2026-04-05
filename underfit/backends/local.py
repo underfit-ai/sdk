@@ -79,12 +79,11 @@ class LocalBackend(Backend):
             return
         self._append_jsonl(self.scalars_dir / "raw.jsonl", {"step": step, "values": values, "timestamp": _now_iso()})
 
-    def log_lines(self, worker_id: str, lines: list[str]) -> None:
-        """Append console log lines for a run."""
+    def log_lines(self, lines: list[str]) -> None:
+        """Append console log lines for the run's worker."""
         if not lines:
             return
-        path = self.logs_dir / f"{worker_id}.log"
-        with path.open("a", encoding="utf-8") as handle:
+        with (self.logs_dir / "log.log").open("a", encoding="utf-8") as handle:
             for line in lines:
                 handle.write(line)
                 if not line.endswith("\n"):
@@ -140,17 +139,12 @@ class LocalBackend(Backend):
         """Return scalar records that were stored for a run."""
         return self._read_jsonl(self.scalars_dir / "raw.jsonl")
 
-    def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
-        """Return log records, optionally filtered by worker id."""
-        paths = [self.logs_dir / f"{worker_id}.log"] if worker_id else sorted(self.logs_dir.glob("*.log"))
-        records: list[dict[str, Any]] = []
-        for path in paths:
-            if not path.exists():
-                continue
-            worker_label = path.stem
-            lines = path.read_text(encoding="utf-8").splitlines()
-            records.extend({"workerId": worker_label, "content": line} for line in lines)
-        return records
+    def read_logs(self) -> list[dict[str, Any]]:
+        """Return log records for the run's worker."""
+        path = self.logs_dir / "log.log"
+        if not path.exists():
+            return []
+        return [{"content": line} for line in path.read_text(encoding="utf-8").splitlines()]
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
         """Return stored artifact entries, optionally filtered by artifact name."""

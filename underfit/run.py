@@ -291,9 +291,9 @@ class Run:
         """Return scalar records available from the active backend."""
         return self.backend.read_scalars()
 
-    def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
+    def read_logs(self) -> list[dict[str, Any]]:
         """Return log records available from the active backend."""
-        return self.backend.read_logs(worker_id)
+        return self.backend.read_logs()
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
         """Return artifact entries available from the active backend."""
