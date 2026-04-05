@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from underfit.artifact import Artifact
-from underfit.backends.api import APIBackend
 from underfit.backends.local import LocalBackend
+from underfit.backends.remote import RemoteBackend
 from underfit.media import Audio, Html, Image, Video
 from underfit.run import PathLike, PathOrBytes, Run
 
@@ -78,7 +78,7 @@ def init(
     else:
         if not (api_key := os.environ.get("UNDERFIT_API_KEY")):
             raise RuntimeError("UNDERFIT_API_KEY is required when initializing with a remote URL")
-        backend = APIBackend(
+        backend = RemoteBackend(
             api_url=remote_url,
             api_key=api_key,
             project_name=project,

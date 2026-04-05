@@ -1,4 +1,4 @@
-"""HTTP backend client for Underfit."""
+"""Remote backend client for Underfit."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class _RequestError(RuntimeError):
         self.payload = payload
 
 
-class APIBackend(Backend):
+class RemoteBackend(Backend):
     """Send run data to the remote Underfit API."""
 
     def __init__(
@@ -49,7 +49,7 @@ class APIBackend(Backend):
         worker_label: str,
         run_id: str | None = None,
     ) -> None:
-        """Initialize an API-backed run transport.
+        """Initialize a remote run transport.
 
         Args:
             api_url: Base Underfit API URL.
@@ -369,17 +369,17 @@ class APIBackend(Backend):
 
     def read_scalars(self) -> list[dict[str, Any]]:
         """Return scalar records that were stored for a run."""
-        raise NotImplementedError("Reading scalars is not implemented for API backend")
+        raise NotImplementedError("Reading scalars is not implemented for the remote backend")
 
     def read_logs(self, worker_id: str | None = None) -> list[dict[str, Any]]:
         """Return log records, optionally filtered by worker id."""
         _ = worker_id
-        raise NotImplementedError("Reading logs is not implemented for API backend")
+        raise NotImplementedError("Reading logs is not implemented for the remote backend")
 
     def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
         """Return stored artifact entries, optionally filtered by artifact name."""
         _ = artifact_name
-        raise NotImplementedError("Reading artifact entries is not implemented for API backend")
+        raise NotImplementedError("Reading artifact entries is not implemented for the remote backend")
 
     def finish(self) -> None:
         """Finalize a run and flush backend state."""
