@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,12 @@ def _require_run() -> Run:
     return run
 
 
+def _default_worker_label() -> str:
+    hostname = socket.gethostname().strip().lower()
+    sanitized = re.sub(r"[^a-z0-9._-]+", "-", hostname).strip("-._") if hostname else ""
+    return sanitized or "worker"
+
+
 def init(
     project: str,
     name: str | None = None,
@@ -33,6 +41,8 @@ def init(
     config: dict[str, Any] | None = None,
     log_dir: Path | None = None,
     remote_url: str | None = None,
+    run_id: str | None = None,
+    worker_label: str | None = None,
 ) -> Run:
     """Initialize a new Underfit run.
 
@@ -42,12 +52,21 @@ def init(
         config: Run configuration dictionary.
         log_dir: Directory for local run logs. Defaults to ``./underfit``.
         remote_url: Base URL for the self-hosted Underfit backend API.
+        run_id: Identifier of an existing run to attach to as a non-primary
+            worker. When provided, a remote URL is required and ``name`` and
+            ``config`` are ignored because the run already exists.
+        worker_label: Label identifying this worker within the run. Defaults
+            to a value derived from the hostname when omitted.
     """
     global run  # noqa: PLW0603
     if run is not None:
         return run
 
     resolved_config = dict(config or {})
+    resolved_worker_label = worker_label or _default_worker_label()
+    if run_id is not None and remote_url is None:
+        raise RuntimeError("remote_url is required when attaching to an existing run via run_id")
+
     if remote_url is None:
         root_dir = log_dir or Path(os.environ.get("UNDERFIT_LOG_DIR", "./underfit"))
         backend = LocalBackend(
@@ -65,6 +84,8 @@ def init(
             project_name=project,
             run_name=name,
             run_config=resolved_config,
+            worker_label=resolved_worker_label,
+            run_id=run_id,
         )
 
     run = Run(project=project, name=backend.run_name, backend=backend, config=resolved_config)

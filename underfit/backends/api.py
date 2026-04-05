@@ -46,6 +46,8 @@ class APIBackend(Backend):
         project_name: str,
         run_name: str | None,
         run_config: dict[str, Any],
+        worker_label: str,
+        run_id: str | None = None,
     ) -> None:
         """Initialize an API-backed run transport.
 
@@ -55,20 +57,31 @@ class APIBackend(Backend):
             project_name: Project name for the run.
             run_name: Optional requested run name.
             run_config: Run configuration payload.
+            worker_label: Label identifying this worker within the run.
+            run_id: Optional identifier of an existing run to attach to as a
+                non-primary worker. When set, ``run_name`` and ``run_config``
+                are ignored and no new run is created.
 
         Raises:
-            RuntimeError: If the API request to initialize the run fails.
+            RuntimeError: If the API request to initialize or attach to the run fails.
         """
         self.api_url = _normalize_api_url(api_url)
         self.api_key = api_key
         self.account_handle = self._resolve_account_handle()
         self.project_name = project_name.lower()
+        self.worker_label = worker_label
         self.scalar_line = 0
         self._run_id: str | None = None
         self._run_name = run_name.lower() if run_name else None
-        self._registered_workers = {"0"}
+        self._is_primary = run_id is None
+        self._registered_workers: set[str] = set()
         self._log_line_offsets: dict[str, int] = {}
-        self._create_run(run_config)
+        if run_id is None:
+            self._create_run(run_config)
+            self._registered_workers.add(worker_label)
+        else:
+            self._attach_to_run(run_id)
+            self._ensure_worker(worker_label)
 
     @property
     def run_name(self) -> str:
@@ -208,7 +221,7 @@ class APIBackend(Backend):
         return f"/accounts/{self.account_handle}/projects/{self.project_name}/runs/{self.run_name}"
 
     def _create_run(self, run_config: dict[str, Any]) -> None:
-        payload = {"workerLabel": "0", "status": "running", "config": run_config or None}
+        payload: dict[str, Any] = {"workerLabel": self.worker_label, "status": "running", "config": run_config or None}
         if self._run_name is not None:
             payload["name"] = self._run_name
         response = self._request(
@@ -225,6 +238,17 @@ class APIBackend(Backend):
         self._run_id = run_id
         self._run_name = name.lower()
 
+    def _attach_to_run(self, run_id: str) -> None:
+        self._run_name = run_id.lower()
+        response = self._request("GET", self._base_run_path())
+        resolved_id = response.get("id") if isinstance(response, dict) else None
+        resolved_name = response.get("name") if isinstance(response, dict) else None
+        if not isinstance(resolved_id, str) or not resolved_id:
+            raise RuntimeError("Underfit run lookup response did not include a run id")
+        if not isinstance(resolved_name, str) or not resolved_name:
+            raise RuntimeError("Underfit run lookup response did not include a run name")
+        self._run_id = resolved_id
+        self._run_name = resolved_name.lower()
     def _ensure_worker(self, worker_label: str) -> None:
         if worker_label in self._registered_workers:
             return
@@ -245,7 +269,7 @@ class APIBackend(Backend):
             return
 
         payload = {
-            "workerLabel": "0",
+            "workerLabel": self.worker_label,
             "startLine": self.scalar_line,
             "scalars": [{"step": step, "values": values, "timestamp": _now_iso()}],
         }
@@ -361,5 +385,12 @@ class APIBackend(Backend):
         """Finalize a run and flush backend state."""
         for worker_label in sorted(self._registered_workers):
             self._request("POST", f"{self._base_run_path()}/logs/flush", {"workerLabel": worker_label})
-        self._request("POST", f"{self._base_run_path()}/scalars/flush", {"workerLabel": "0"})
-        self._request("PUT", f"{self._base_run_path()}", {"status": "finished"})
+        self._request("POST", f"{self._base_run_path()}/scalars/flush", {"workerLabel": self.worker_label})
+        if self._is_primary:
+            self._request("PUT", f"{self._base_run_path()}", {"status": "finished"})
+        else:
+            self._request(
+                "PUT",
+                f"{self._base_run_path()}/workers/{self.worker_label}",
+                {"status": "finished"},
+            )
