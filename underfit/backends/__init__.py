@@ -6,6 +6,7 @@ from typing import Protocol, runtime_checkable
 
 from underfit.artifact import Artifact
 from underfit.backends.local import LocalBackend
+from underfit.backends.remote import RemoteBackend
 from underfit.media import Media
 
 
@@ -33,4 +34,4 @@ class Backend(Protocol):
         """Finalize a run and flush backend state."""
 
 
-__all__ = ["Backend", "LocalBackend"]
+__all__ = ["Backend", "LocalBackend", "RemoteBackend"]
