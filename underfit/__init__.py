@@ -5,11 +5,14 @@ from __future__ import annotations
 import os
 import re
 import socket
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
 
 from underfit.artifact import Artifact
-from underfit.backends import LocalBackend, RemoteBackend
+from underfit.backends import Backend, LocalBackend, RemoteBackend
+from underfit.lib.terminal import capture
 from underfit.media import Audio, Html, Image, Video
 from underfit.run import PathLike, PathOrBytes, Run
 
@@ -19,6 +22,7 @@ __all__ = [
 ]
 
 run: Run | None = None
+_capture_context: AbstractContextManager[None] | None = None
 
 
 def _require_run() -> Run:
@@ -31,6 +35,23 @@ def _default_worker_label() -> str:
     hostname = socket.gethostname().strip().lower()
     sanitized = re.sub(r"[^a-z0-9._-]+", "-", hostname).strip("-._") if hostname else ""
     return sanitized or "worker"
+
+
+@contextmanager
+def _capture_output(backend: Backend) -> Iterator[None]:
+    pending = {"stdout": "", "stderr": ""}
+
+    def write(stream: str, data: str) -> None:
+        pending[stream] += data
+        lines = pending[stream].split("\n")
+        pending[stream] = lines.pop()
+        if lines:
+            backend.log_lines(lines)
+
+    with capture(write):
+        yield
+    if tail := [line for line in pending.values() if line]:
+        backend.log_lines(tail)
 
 
 def init(
@@ -57,7 +78,7 @@ def init(
         worker_label: Label identifying this worker within the run. Defaults
             to a value derived from the hostname when omitted.
     """
-    global run  # noqa: PLW0603
+    global run, _capture_context  # noqa: PLW0603
     if run is not None:
         return run
 
@@ -88,6 +109,8 @@ def init(
         )
 
     run = Run(project=project, name=backend.run_name, backend=backend, config=resolved_config)
+    _capture_context = _capture_output(backend)
+    _capture_context.__enter__()
     return run
 
 
@@ -108,9 +131,12 @@ def log_model(checkpoint: PathOrBytes, *, name: str | None = None) -> Artifact:
 
 def finish() -> None:
     """Finish the current run."""
-    global run  # noqa: PLW0603
+    global run, _capture_context  # noqa: PLW0603
     if run is None:
         return
 
     run.finish()
+    if _capture_context is not None:
+        _capture_context.__exit__(None, None, None)
+        _capture_context = None
     run = None
