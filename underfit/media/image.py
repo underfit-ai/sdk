@@ -61,6 +61,7 @@ class Image:
 
         if isinstance(data_or_path, (str, Path)):
             path = Path(data_or_path)
+            self._validate_path(path, "image")
         elif isinstance(data_or_path, (bytes, bytearray, memoryview)):
             data = bytes(data_or_path)
         else:
