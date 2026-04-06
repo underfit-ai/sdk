@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from underfit.artifact import Artifact
-from underfit.backends.local import LocalBackend
-from underfit.backends.remote import RemoteBackend
+from underfit.backends import LocalBackend, RemoteBackend  # ty: ignore[unresolved-import]
 from underfit.media import Audio, Html, Image, Video
 from underfit.run import PathLike, PathOrBytes, Run
 
