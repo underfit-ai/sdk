@@ -339,19 +339,6 @@ class RemoteBackend(Backend):
             return base64.b64decode(upload.data)
         raise RuntimeError("Artifact upload is missing file content")
 
-    def read_scalars(self) -> list[dict[str, Any]]:
-        """Return scalar records that were stored for a run."""
-        raise NotImplementedError("Reading scalars is not implemented for the remote backend")
-
-    def read_logs(self) -> list[dict[str, Any]]:
-        """Return log records for the run's worker."""
-        raise NotImplementedError("Reading logs is not implemented for the remote backend")
-
-    def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
-        """Return stored artifact entries, optionally filtered by artifact name."""
-        _ = artifact_name
-        raise NotImplementedError("Reading artifact entries is not implemented for the remote backend")
-
     def finish(self) -> None:
         """Finalize a run and mark the worker or run as finished."""
         if self._is_primary:

@@ -31,17 +31,5 @@ class Backend(ABC):
         """Store an artifact for a run."""
 
     @abstractmethod
-    def read_scalars(self) -> list[dict[str, Any]]:
-        """Return scalar records that were stored for a run."""
-
-    @abstractmethod
-    def read_logs(self) -> list[dict[str, Any]]:
-        """Return log records for the run's worker."""
-
-    @abstractmethod
-    def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
-        """Return stored artifact entries, optionally filtered by artifact name."""
-
-    @abstractmethod
     def finish(self) -> None:
         """Finalize a run and flush backend state."""

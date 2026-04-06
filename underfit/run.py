@@ -286,15 +286,3 @@ class Run:
             return
         self.backend.finish()
         self._finished = True
-
-    def read_scalars(self) -> list[dict[str, Any]]:
-        """Return scalar records available from the active backend."""
-        return self.backend.read_scalars()
-
-    def read_logs(self) -> list[dict[str, Any]]:
-        """Return log records available from the active backend."""
-        return self.backend.read_logs()
-
-    def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
-        """Return artifact entries available from the active backend."""
-        return self.backend.read_artifact_entries(artifact_name)

@@ -135,47 +135,6 @@ class LocalBackend(Backend):
         })
         self._write_json(artifact_dir / "manifest.json", asdict(artifact.manifest()))
 
-    def read_scalars(self) -> list[dict[str, Any]]:
-        """Return scalar records that were stored for a run."""
-        return self._read_jsonl(self.scalars_dir / "raw.jsonl")
-
-    def read_logs(self) -> list[dict[str, Any]]:
-        """Return log records for the run's worker."""
-        path = self.logs_dir / "log.log"
-        if not path.exists():
-            return []
-        return [{"content": line} for line in path.read_text(encoding="utf-8").splitlines()]
-
-    def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
-        """Return stored artifact entries, optionally filtered by artifact name."""
-        records: list[dict[str, Any]] = []
-        for artifact_dir in sorted(self.artifacts_dir.iterdir()) if self.artifacts_dir.exists() else []:
-            if not artifact_dir.is_dir():
-                continue
-            metadata_path = artifact_dir / "artifact.json"
-            manifest_path = artifact_dir / "manifest.json"
-            if not metadata_path.exists() or not manifest_path.exists():
-                continue
-            metadata = self._read_json(metadata_path)
-            name = metadata.get("name")
-            if artifact_name is not None and name != artifact_name:
-                continue
-            manifest = self._read_json(manifest_path)
-            files_dir = artifact_dir / "files"
-            for file_path in manifest.get("files", []):
-                records.append({
-                    "artifactId": artifact_dir.name,
-                    "artifactName": name,
-                    "entry": {"kind": "file", "name": file_path, "path": str(files_dir / file_path)},
-                })
-            for reference in manifest.get("references", []):
-                records.append({
-                    "artifactId": artifact_dir.name,
-                    "artifactName": name,
-                    "entry": {"kind": "reference", **reference},
-                })
-        return records
-
     def finish(self) -> None:
         """Finalize a run and flush backend state."""
         metadata = self._read_metadata()
@@ -215,13 +174,6 @@ class LocalBackend(Backend):
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True))
             handle.write("\n")
-
-    def _read_jsonl(self, path: Path) -> list[dict[str, Any]]:
-        if not path.exists():
-            return []
-        with path.open("r", encoding="utf-8") as handle:
-            lines = [line.strip() for line in handle]
-            return [json.loads(line) for line in lines if line]
 
     def _read_json(self, path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))

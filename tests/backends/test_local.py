@@ -34,11 +34,9 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     scalar_path = backend.run_dir / "scalars" / "0" / "raw.jsonl"
     scalar_lines = [json.loads(line) for line in scalar_path.read_text().splitlines()]
     assert scalar_lines == [{"step": 1, "values": {"loss": 0.8}, "timestamp": scalar_lines[0]["timestamp"]}]
-    assert backend.read_scalars() == scalar_lines
 
     log_path = backend.run_dir / "logs" / "log.log"
     assert log_path.read_text() == "hello\nworld\n"
-    assert backend.read_logs() == [{"content": "hello"}, {"content": "world"}]
 
     artifact_dirs = [path for path in (backend.run_dir / "artifacts").iterdir() if path.is_dir()]
     assert len(artifact_dirs) == 1
@@ -51,11 +49,6 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     }
     assert json.loads((artifact_dir / "manifest.json").read_text()) == {"files": ["payload.json"], "references": []}
     assert (artifact_dir / "files" / "payload.json").read_bytes() == b"{}"
-    assert backend.read_artifact_entries("dataset-v1") == [{
-        "artifactId": artifact_dir.name,
-        "artifactName": "dataset-v1",
-        "entry": {"kind": "file", "name": "payload.json", "path": str(artifact_dir / "files" / "payload.json")},
-    }]
 
     media_dirs = [path for path in (backend.run_dir / "media").iterdir() if path.is_dir()]
     assert len(media_dirs) == 1

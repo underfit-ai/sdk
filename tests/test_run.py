@@ -45,16 +45,6 @@ class _RecordingBackend(Backend):
             raise TypeError("artifact must be an underfit.Artifact")
         self.artifact_calls.append(artifact)
 
-    def read_scalars(self) -> list[dict[str, Any]]:
-        return []
-
-    def read_logs(self) -> list[dict[str, Any]]:
-        return []
-
-    def read_artifact_entries(self, artifact_name: str | None = None) -> list[dict[str, Any]]:
-        _ = artifact_name
-        return []
-
     def finish(self) -> None:
         self.finish_calls += 1
 
