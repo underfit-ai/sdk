@@ -21,7 +21,7 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     artifact.add_bytes(b"{}", name="payload.json")
     backend.log_artifact(artifact)
 
-    backend.log_media("samples", 7, [Html("<h1>ok</h1>", caption="summary").to_payload()])
+    backend.log_media("samples", 7, [Html("<h1>ok</h1>", caption="summary")])
     backend.finish()
 
     UUID(backend.run_dir.name)

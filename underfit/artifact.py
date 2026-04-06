@@ -16,11 +16,10 @@ from pathlib import Path
 from typing import Any, Union
 from urllib.parse import unquote, urlparse
 
-from underfit.media import Audio, Html, Image, Video
+from underfit.media import Media
 
 PathLike = Union[str, Path]
 BytesLike = Union[bytes, bytearray, memoryview]
-MediaObject = Union[Html, Image, Video, Audio]
 MAX_PATH_BYTES = 1024
 MAX_PATH_SEGMENT_BYTES = 255
 
@@ -169,7 +168,7 @@ class Artifact:
             self._upload_files.append(ArtifactPathUpload(path=child_path, source_path=str(child)))
         return artifact_path
 
-    def add_media(self, obj: MediaObject, *, name: str | None = None) -> str:
+    def add_media(self, obj: Media, *, name: str | None = None) -> str:
         """Add a media object to the artifact.
 
         Args:
@@ -183,11 +182,8 @@ class Artifact:
             TypeError: If ``obj`` is not a supported media object.
             ValueError: If the file path is invalid.
         """
-        if not isinstance(obj, (Html, Image, Video, Audio)):
-            raise TypeError(
-                "obj must be an underfit.media.Html, underfit.media.Image, "
-                "underfit.media.Video, or underfit.media.Audio"
-            )
+        if not isinstance(obj, Media):
+            raise TypeError("obj must be an underfit media object implementing the Media protocol")
 
         payload = obj.to_payload()
         default_name = self._default_media_name(payload)

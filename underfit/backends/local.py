@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from underfit.artifact import ArtifactDataUpload, ArtifactPathUpload
-from underfit.backends.base import Backend
+from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
+from underfit.media import Media
 
 
-class LocalBackend(Backend):
+class LocalBackend:
     """Persist run data in local files for offline usage."""
 
     def __init__(
@@ -69,10 +69,11 @@ class LocalBackend(Backend):
                 if not line.endswith("\n"):
                     f.write("\n")
 
-    def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
+    def log_media(self, key: str, step: int | None, media: list[Media]) -> None:
         """Append media files for a run under a shared key and step."""
-        if not payloads:
+        if not media:
             return
+        payloads = [m.to_payload() for m in media]
         dest = self.run_dir / "media" / str(uuid4())
         dest.mkdir(parents=True, exist_ok=True)
         for idx, payload in enumerate(payloads):
@@ -82,15 +83,8 @@ class LocalBackend(Backend):
         info = {"key": key, "step": step, "type": payloads[0].get("_type"), "metadata": metadata or None}
         (dest / "media.json").write_text(json.dumps(info, indent=2, sort_keys=True), encoding="utf-8")
 
-    def log_artifact(self, artifact: Any) -> None:
+    def log_artifact(self, artifact: Artifact) -> None:
         """Store an artifact for a run."""
-        artifact_name = getattr(artifact, "name", None)
-        artifact_type = getattr(artifact, "type", None)
-        if not isinstance(artifact_name, str) or not artifact_name:
-            raise RuntimeError("Artifact is missing a valid name")
-        if not isinstance(artifact_type, str) or not artifact_type:
-            raise RuntimeError("Artifact is missing a valid type")
-
         artifact_dir = self.run_dir / "artifacts" / str(uuid4())
         files_dir = artifact_dir / "files"
         files_dir.mkdir(parents=True, exist_ok=True)
@@ -110,8 +104,7 @@ class LocalBackend(Backend):
             else:
                 raise RuntimeError("Artifact upload is missing file content")
 
-        artifact_metadata = getattr(artifact, "metadata", None)
-        info = {"name": artifact_name, "type": artifact_type, "metadata": artifact_metadata or None}
+        info = {"name": artifact.name, "type": artifact.type, "metadata": artifact.metadata or None}
         (artifact_dir / "artifact.json").write_text(json.dumps(info, indent=2, sort_keys=True), encoding="utf-8")
         manifest = json.dumps(asdict(artifact.manifest()), indent=2, sort_keys=True)
         (artifact_dir / "manifest.json").write_text(manifest, encoding="utf-8")

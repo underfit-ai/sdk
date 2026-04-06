@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from underfit.artifact import Artifact
-from underfit.backends import LocalBackend, RemoteBackend  # ty: ignore[unresolved-import]
+from underfit.backends import LocalBackend
 from underfit.media import Audio, Html, Image, Video
 from underfit.run import PathLike, PathOrBytes, Run
 
@@ -62,7 +62,7 @@ def init(
         return run
 
     resolved_config = dict(config or {})
-    resolved_worker_label = worker_label or _default_worker_label()
+    # resolved_worker_label = worker_label or _default_worker_label()
     if run_id is not None and remote_url is None:
         raise RuntimeError("remote_url is required when attaching to an existing run via run_id")
 
@@ -75,17 +75,18 @@ def init(
             root_dir=root_dir.resolve(),
         )
     else:
-        if not (api_key := os.environ.get("UNDERFIT_API_KEY")):
-            raise RuntimeError("UNDERFIT_API_KEY is required when initializing with a remote URL")
-        backend = RemoteBackend(
-            api_url=remote_url,
-            api_key=api_key,
-            project_name=project,
-            run_name=name,
-            run_config=resolved_config,
-            worker_label=resolved_worker_label,
-            run_id=run_id,
-        )
+        raise RuntimeError("Remote backend not not implemented yet")
+        # if not (api_key := os.environ.get("UNDERFIT_API_KEY")):
+        #     raise RuntimeError("UNDERFIT_API_KEY is required when initializing with a remote URL")
+        # backend = RemoteBackend(
+        #     api_url=remote_url,
+        #     api_key=api_key,
+        #     project_name=project,
+        #     run_name=name,
+        #     run_config=resolved_config,
+        #     worker_label=resolved_worker_label,
+        #     run_id=run_id,
+        # )
 
     run = Run(project=project, name=backend.run_name, backend=backend, config=resolved_config)
     return run

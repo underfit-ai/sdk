@@ -9,7 +9,7 @@ from typing import Any, Callable, Union
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from underfit.artifact import Artifact
-from underfit.backends.base import Backend
+from underfit.backends import Backend
 from underfit.media import Audio, Html, Image, Video
 
 PathLike = Union[str, Path]
@@ -115,8 +115,7 @@ class Run:
         if scalar_values:
             self.backend.log_scalars(scalar_values, step)
         for key, media_list in media_batches:
-            payloads = [media.to_payload() for media in media_list]
-            self.backend.log_media(key, step, payloads)
+            self.backend.log_media(key, step, media_list)
 
     def log_code(
         self,

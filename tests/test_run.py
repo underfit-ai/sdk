@@ -7,14 +7,13 @@ import importlib
 import subprocess
 from io import BytesIO
 from pathlib import Path
-from typing import Any
 from zipfile import ZipFile
 
 import pytest
 
 from underfit.artifact import Artifact, ArtifactDataUpload
-from underfit.backends.base import Backend
-from underfit.media import Html
+from underfit.backends import Backend
+from underfit.media import Html, Media
 from underfit.run import Run
 
 run_module = importlib.import_module("underfit.run")
@@ -23,7 +22,7 @@ run_module = importlib.import_module("underfit.run")
 class _RecordingBackend(Backend):
     def __init__(self) -> None:
         self.scalar_calls: list[tuple[dict[str, float], int | None]] = []
-        self.media_calls: list[tuple[str, int | None, list[dict[str, Any]]]] = []
+        self.media_calls: list[tuple[str, int | None, list[Media]]] = []
         self.artifact_calls: list[Artifact] = []
         self.finish_calls = 0
 
@@ -37,10 +36,10 @@ class _RecordingBackend(Backend):
     def log_lines(self, lines: list[str]) -> None:
         _ = lines
 
-    def log_media(self, key: str, step: int | None, payloads: list[dict[str, Any]]) -> None:
-        self.media_calls.append((key, step, payloads))
+    def log_media(self, key: str, step: int | None, media: list[Media]) -> None:
+        self.media_calls.append((key, step, media))
 
-    def log_artifact(self, artifact: Any) -> None:
+    def log_artifact(self, artifact: Artifact) -> None:
         if not isinstance(artifact, Artifact):
             raise TypeError("artifact must be an underfit.Artifact")
         self.artifact_calls.append(artifact)
@@ -72,7 +71,7 @@ def test_log_records_scalars_and_media() -> None:
     assert len(backend.media_calls) == 2
     assert backend.media_calls[0][0:2] == ("report", 3)
     assert backend.media_calls[1][0:2] == ("samples/gallery", 3)
-    assert [payload["_type"] for payload in backend.media_calls[1][2]] == ["html", "html"]
+    assert all(isinstance(m, Html) for m in backend.media_calls[1][2])
 
 
 def test_log_rejects_unsupported_values() -> None:
