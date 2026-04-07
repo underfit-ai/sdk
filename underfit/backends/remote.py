@@ -47,10 +47,10 @@ class RemoteBackend:
         api_url: Base URL for the Underfit API.
         api_key: API key for authentication.
         project: Project identifier as ``"owner/project-name"``.
-        run_name: Optional run name for new runs.
+        run_name: Run name for the launch request.
+        launch_id: Launch ID grouping workers in a single run.
         run_config: Run configuration payload.
         worker_label: Label identifying this worker.
-        run_id: Run name of an existing run to join as a non-primary worker.
     """
 
     def __init__(  # noqa: D107
@@ -59,10 +59,10 @@ class RemoteBackend:
         api_url: str,
         api_key: str,
         project: str,
-        run_name: str | None,
+        run_name: str,
+        launch_id: str,
         run_config: dict[str, Any],
         worker_label: str,
-        run_id: str | None = None,
     ) -> None:
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key
@@ -73,20 +73,13 @@ class RemoteBackend:
         self._next_scalar_line = 0
 
         base = f"{self._api_url}/accounts/{self._handle}/projects/{self._project_name}"
-        if run_id is None:
-            body: dict[str, Any] = {"worker_label": worker_label, "config": run_config}
-            if run_name:
-                body["name"] = run_name.strip()
-            resp = self._request("POST", f"{base}/runs", body, auth="api_key")
-            self._run_name = resp["name"]
-            self._run_id = resp["id"]
-            self._worker_token = resp["workerToken"]
-        else:
-            self._run_name = run_id
-            url = f"{base}/runs/{run_id}/workers"
-            resp = self._request("POST", url, {"workerLabel": worker_label}, auth="api_key")
-            self._run_id = resp["runId"]
-            self._worker_token = resp["workerToken"]
+        body: dict[str, Any] = {"runName": run_name, "launchId": launch_id, "workerLabel": worker_label}
+        if run_config:
+            body["config"] = run_config
+        resp = self._request("POST", f"{base}/runs/launch", body, auth="api_key")
+        self._run_name = resp["name"]
+        self._run_id = resp["id"]
+        self._worker_token = resp["workerToken"]
 
     @property
     def run_name(self) -> str:

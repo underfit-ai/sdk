@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import random
 import re
 import socket
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from underfit.artifact import Artifact
 from underfit.backends import Backend, LocalBackend, RemoteBackend
@@ -37,6 +39,13 @@ def _default_worker_label() -> str:
     return sanitized or "worker"
 
 
+def _generate_run_name() -> str:
+    wordlists = Path(__file__).parent / "wordlists"
+    adjectives = (wordlists / "adjectives.txt").read_text().splitlines()
+    nouns = (wordlists / "nouns.txt").read_text().splitlines()
+    return f"{random.choice(adjectives)}-{random.choice(nouns)}"  # noqa: S311
+
+
 @contextmanager
 def _capture_output(backend: Backend) -> Iterator[None]:
     pending = {"stdout": "", "stderr": ""}
@@ -61,20 +70,19 @@ def init(
     config: dict[str, Any] | None = None,
     log_dir: Path | None = None,
     remote_url: str | None = None,
-    run_id: str | None = None,
+    launch_id: str | None = None,
     worker_label: str | None = None,
 ) -> Run:
     """Initialize a new Underfit run.
 
     Args:
         project: Project name.
-        name: Optional run name.
+        name: Optional run name. When omitted a random name is generated.
         config: Run configuration dictionary.
         log_dir: Directory for local run logs. Defaults to ``./underfit``.
         remote_url: Base URL for the self-hosted Underfit backend API.
-        run_id: Identifier of an existing run to attach to as a non-primary
-            worker. When provided, a remote URL is required and ``name`` and
-            ``config`` are ignored because the run already exists.
+        launch_id: Shared launch identifier for multi-worker runs. When
+            omitted a unique ID is generated for a single-worker run.
         worker_label: Label identifying this worker within the run. Defaults
             to a value derived from the hostname when omitted.
     """
@@ -83,15 +91,13 @@ def init(
         return run
 
     resolved_config = dict(config or {})
-    if run_id is not None and remote_url is None:
-        raise RuntimeError("remote_url is required when attaching to an existing run via run_id")
-
+    resolved_name = name.strip() if name else _generate_run_name()
     resolved_worker_label = worker_label or _default_worker_label()
     if remote_url is None:
         root_dir = log_dir or Path(os.environ.get("UNDERFIT_LOG_DIR", "./underfit"))
         backend = LocalBackend(
             project_name=project,
-            run_name=name,
+            run_name=resolved_name,
             run_config=resolved_config,
             root_dir=root_dir.resolve(),
         )
@@ -102,10 +108,10 @@ def init(
             api_url=remote_url,
             api_key=api_key,
             project=project,
-            run_name=name,
+            run_name=resolved_name,
+            launch_id=launch_id or uuid4().hex,
             run_config=resolved_config,
             worker_label=resolved_worker_label,
-            run_id=run_id,
         )
 
     run = Run(project=project, name=backend.run_name, backend=backend, config=resolved_config)

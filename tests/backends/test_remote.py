@@ -43,38 +43,24 @@ def _mock_urlopen(requests: list[tuple[str, str, Any]], responses: list[dict[str
     return handler
 
 
-def _create_backend(requests: list[tuple[str, str, Any]], *, run_id: str | None = None) -> RemoteBackend:
-    if run_id is None:
-        init_responses = [{"id": "run-uuid", "name": "my-run", "workerToken": "wt-123"}]
-    else:
-        init_responses = [{"runId": "run-uuid", "workerToken": "wt-456"}]
+def _create_backend(requests: list[tuple[str, str, Any]]) -> RemoteBackend:
+    init_responses = [{"id": "run-uuid", "name": "server-name", "workerToken": "wt-123"}]
     with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(requests, init_responses)):
         return RemoteBackend(
             api_url=API_URL, api_key=API_KEY, project="owner/proj", run_name="my-run",
-            run_config={"lr": 0.01}, worker_label="gpu-0", run_id=run_id,
+            launch_id="launch-1", run_config={"lr": 0.01}, worker_label="gpu-0",
         )
 
 
-def test_create_run() -> None:
-    """Create a run via the API and receive a worker token."""
+def test_launch_run() -> None:
+    """Launch a run and adopt the server-returned name."""
     requests: list[tuple[str, str, Any]] = []
     backend = _create_backend(requests)
-    assert backend.run_name == "my-run"
+    assert backend.run_name == "server-name"
     method, url, body = requests[0]
     assert method == "POST"
-    assert url == f"{API_URL}/accounts/owner/projects/proj/runs"
-    assert body == {"name": "my-run", "worker_label": "gpu-0", "config": {"lr": 0.01}}
-
-
-def test_join_run() -> None:
-    """Join an existing run as a non-primary worker."""
-    requests: list[tuple[str, str, Any]] = []
-    backend = _create_backend(requests, run_id="existing-run")
-    assert backend.run_name == "existing-run"
-    method, url, body = requests[0]
-    assert method == "POST"
-    assert url == f"{API_URL}/accounts/owner/projects/proj/runs/existing-run/workers"
-    assert body == {"workerLabel": "gpu-0"}
+    assert url == f"{API_URL}/accounts/owner/projects/proj/runs/launch"
+    assert body == {"runName": "my-run", "launchId": "launch-1", "workerLabel": "gpu-0", "config": {"lr": 0.01}}
 
 
 def test_log_scalars() -> None:
@@ -92,17 +78,21 @@ def test_log_scalars() -> None:
 
 
 def test_log_lines() -> None:
-    """Send log lines with newline stripping and line numbers."""
+    """Send log lines with newline stripping and incrementing line numbers."""
     reqs: list[tuple[str, str, Any]] = []
     backend = _create_backend(reqs)
     reqs.clear()
-    responses = [{"nextStartLine": 2, "status": "buffered"}]
+    responses = [
+        {"nextStartLine": 2, "status": "buffered"},
+        {"nextStartLine": 5, "status": "buffered"},
+    ]
     with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, responses)):
         backend.log_lines(["hello\n", "world"])
-    _, _, body = reqs[0]
-    assert body["startLine"] == 0
-    assert body["lines"][0]["content"] == "hello"
-    assert body["lines"][1]["content"] == "world"
+        backend.log_lines(["a", "b", "c"])
+    assert reqs[0][2]["startLine"] == 0
+    assert reqs[0][2]["lines"][0]["content"] == "hello"
+    assert reqs[0][2]["lines"][1]["content"] == "world"
+    assert reqs[1][2]["startLine"] == 2
 
 
 def test_log_media() -> None:
@@ -144,19 +134,3 @@ def test_finish_sets_terminal_state() -> None:
     assert len(reqs) == 1
     assert reqs[0][1] == f"{API_URL}/runs/terminal-state"
     assert reqs[0][2] == {"terminalState": "finished"}
-
-
-def test_line_numbers_increment() -> None:
-    """Track line numbers across multiple flush calls."""
-    reqs: list[tuple[str, str, Any]] = []
-    backend = _create_backend(reqs)
-    reqs.clear()
-    responses = [
-        {"nextStartLine": 2, "status": "buffered"},
-        {"nextStartLine": 5, "status": "buffered"},
-    ]
-    with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, responses)):
-        backend.log_lines(["a", "b"])
-        backend.log_lines(["c", "d", "e"])
-    assert reqs[0][2]["startLine"] == 0
-    assert reqs[1][2]["startLine"] == 2

@@ -22,7 +22,7 @@ class LocalBackend:
         self,
         *,
         project_name: str,
-        run_name: str | None,
+        run_name: str,
         run_config: dict[str, Any],
         root_dir: str | Path | None = None,
     ) -> None:
@@ -30,12 +30,11 @@ class LocalBackend:
 
         Args:
             project_name: Project name for the run.
-            run_name: Optional requested run name.
+            run_name: Run name.
             run_config: Run configuration payload.
             root_dir: Root directory for local run data.
         """
-        name = run_name.strip() if isinstance(run_name, str) else None
-        self._run_name = name or datetime.now(timezone.utc).strftime("run-%Y%m%d-%H%M%S")
+        self._run_name = run_name
         self.run_dir = Path(root_dir or Path.cwd() / "underfit") / str(uuid4())
         self.run_dir.mkdir(parents=True, exist_ok=True)
         meta = {"project": project_name, "name": self.run_name, "config": run_config}
