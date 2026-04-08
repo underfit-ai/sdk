@@ -14,6 +14,7 @@ from underfit.media import Audio, Html, Image, Video
 
 PathLike = Union[str, Path]
 PathOrBytes = Union[str, Path, bytes, bytearray, memoryview]
+PathFilter = Callable[[Path], bool]
 
 
 def _git_output(repo_path: Path, args: list[str], *, ok_returncodes: tuple[int, ...] = (0,)) -> bytes:
@@ -122,8 +123,8 @@ class Run:
         root_path: PathLike | None = None,
         *,
         name: str | None = None,
-        include: Callable[[Path], bool] | None = None,
-        exclude: Callable[[Path], bool] | None = None,
+        include: PathFilter | None = None,
+        exclude: PathFilter | None = None,
     ) -> Artifact:
         """Upload source code under a root path as a zip artifact.
 

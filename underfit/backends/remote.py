@@ -44,19 +44,9 @@ def _multipart_body(metadata: dict[str, Any], files: list[bytes]) -> tuple[bytes
 
 
 class RemoteBackend:
-    """Push run data to a remote Underfit API server.
+    """Push run data to a remote Underfit API server."""
 
-    Args:
-        api_url: Base URL for the Underfit API.
-        api_key: API key for authentication.
-        project: Project identifier as ``"owner/project-name"``.
-        run_name: Run name for the launch request.
-        launch_id: Launch ID grouping workers in a single run.
-        run_config: Run configuration payload.
-        worker_label: Label identifying this worker.
-    """
-
-    def __init__(  # noqa: D107
+    def __init__(
         self,
         *,
         api_url: str,
@@ -67,6 +57,17 @@ class RemoteBackend:
         run_config: dict[str, Any],
         worker_label: str,
     ) -> None:
+        """Initialize a remote backend.
+
+        Args:
+            api_url: Base URL for the Underfit API.
+            api_key: API key for authentication.
+            project: Project identifier as ``"owner/project-name"``.
+            run_name: Run name for the launch request.
+            launch_id: Launch ID grouping workers in a single run.
+            run_config: Run configuration payload.
+            worker_label: Label identifying this worker.
+        """
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key
         self._handle, self._project_name = project.split("/", 1)
@@ -124,12 +125,10 @@ class RemoteBackend:
         if extra:
             meta["metadata"] = extra
         data, content_type = _multipart_body(meta, [_extract_media_content(p) for p in payloads])
-        req = urllib.request.Request(  # noqa: S310
-            f"{self._api_url}/ingest/media", data=data, method="POST",
-        )
+        req = urllib.request.Request(f"{self._api_url}/ingest/media", data=data, method="POST")
         req.add_header("Authorization", f"Bearer {self._worker_token}")
         req.add_header("Content-Type", content_type)
-        with urllib.request.urlopen(req) as resp:  # noqa: S310
+        with urllib.request.urlopen(req) as resp:
             resp.read()
 
     def log_artifact(self, artifact: Artifact) -> None:
@@ -154,9 +153,8 @@ class RemoteBackend:
             url = f"{self._api_url}/artifacts/{artifact_id}/files/{upload.path}"
             self._request_raw("PUT", url, file_data, auth="api_key")
         manifest = asdict(artifact.manifest())
-        self._request(
-            "POST", f"{self._api_url}/artifacts/{artifact_id}/finalize", {"manifest": manifest}, auth="api_key",
-        )
+        url = f"{self._api_url}/artifacts/{artifact_id}/finalize"
+        self._request("POST", url, {"manifest": manifest}, auth="api_key")
 
     def _sample_metrics(self) -> None:
         self._metrics_tick += 1
@@ -204,17 +202,17 @@ class RemoteBackend:
         self, method: str, url: str, body: dict[str, Any] | None = None, *, auth: str = "worker",
     ) -> dict[str, Any]:
         data = json.dumps(body).encode() if body else None
-        req = urllib.request.Request(url, data=data, method=method)  # noqa: S310
+        req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Content-Type", "application/json")
         token = self._api_key if auth == "api_key" else self._worker_token
         req.add_header("Authorization", f"Bearer {token}")
-        with urllib.request.urlopen(req) as resp:  # noqa: S310
+        with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())
 
     def _request_raw(self, method: str, url: str, data: bytes, *, auth: str = "worker") -> None:
-        req = urllib.request.Request(url, data=data, method=method)  # noqa: S310
+        req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Content-Type", "application/octet-stream")
         token = self._api_key if auth == "api_key" else self._worker_token
         req.add_header("Authorization", f"Bearer {token}")
-        with urllib.request.urlopen(req) as resp:  # noqa: S310
+        with urllib.request.urlopen(req) as resp:
             resp.read()

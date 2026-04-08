@@ -320,9 +320,9 @@ class Artifact:
         return path
 
     def _http_reference(self, url: str) -> ArtifactReference:
-        request = urllib.request.Request(url, method="HEAD")  # noqa: S310
+        request = urllib.request.Request(url, method="HEAD")
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+            with urllib.request.urlopen(request, timeout=10) as response:
                 return self._headers_reference(url, response.headers)
         except urllib.error.HTTPError as exc:
             return self._headers_reference(url, exc.headers)

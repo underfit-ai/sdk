@@ -16,7 +16,7 @@ from underfit.artifact import Artifact
 from underfit.backends import Backend, LocalBackend, RemoteBackend
 from underfit.lib.terminal import capture
 from underfit.media import Audio, Html, Image, Video
-from underfit.run import PathLike, PathOrBytes, Run
+from underfit.run import PathFilter, PathLike, PathOrBytes, Run
 
 __all__ = [
     "Artifact", "Audio", "Html", "Image", "Run", "Video",
@@ -123,6 +123,17 @@ def init(
 def log(data: dict[str, Any], step: int | None = None) -> None:
     """Log metrics to the current run."""
     _require_run().log(data, step=step)
+
+
+def log_code(
+    root_path: PathLike | None = None,
+    *,
+    name: str | None = None,
+    include: PathFilter | None = None,
+    exclude: PathFilter | None = None
+) -> Artifact:
+    """Log the source code under a root path to the active run."""
+    return _require_run().log_code(root_path, name=name, include=include, exclude=exclude)
 
 
 def log_git(repo_path: PathLike | None = None, *, name: str | None = None) -> Artifact:

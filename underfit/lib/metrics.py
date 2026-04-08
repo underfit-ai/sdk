@@ -41,7 +41,8 @@ class SystemMetrics:
     Missing libraries are silently skipped.
     """
 
-    def __init__(self) -> None:  # noqa: D107
+    def __init__(self) -> None:
+        """Initialize a system metrics collector."""
         self._gpu = _init_gpu()
         self.available = _has_psutil or self._gpu is not None
 
