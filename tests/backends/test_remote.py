@@ -46,10 +46,13 @@ def _mock_urlopen(requests: list[tuple[str, str, Any]], responses: list[dict[str
 def _create_backend(requests: list[tuple[str, str, Any]]) -> RemoteBackend:
     init_responses = [{"id": "run-uuid", "name": "server-name", "workerToken": "wt-123"}]
     with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(requests, init_responses)):
-        return RemoteBackend(
+        backend = RemoteBackend(
             api_url=API_URL, api_key=API_KEY, project="owner/proj", run_name="my-run",
             launch_id="launch-1", run_config={"lr": 0.01}, worker_label="gpu-0",
         )
+    backend._stop.set()  # noqa: SLF001
+    backend._flush_thread.join()  # noqa: SLF001
+    return backend
 
 
 def test_launch_run() -> None:
@@ -71,6 +74,7 @@ def test_log_scalars() -> None:
     responses = [{"nextStartLine": 1, "status": "buffered"}]
     with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, responses)):
         backend.log_scalars({"loss": 0.5}, step=1)
+        backend._flush_scalars()  # noqa: SLF001
     _, _, body = reqs[0]
     assert body["startLine"] == 0
     assert body["scalars"][0]["values"] == {"loss": 0.5}
@@ -88,7 +92,9 @@ def test_log_lines() -> None:
     ]
     with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, responses)):
         backend.log_lines(["hello\n", "world"])
+        backend._flush_logs()  # noqa: SLF001
         backend.log_lines(["a", "b", "c"])
+        backend._flush_logs()  # noqa: SLF001
     assert reqs[0][2]["startLine"] == 0
     assert reqs[0][2]["lines"][0]["content"] == "hello"
     assert reqs[0][2]["lines"][1]["content"] == "world"
@@ -119,6 +125,7 @@ def test_log_artifact(tmp_path: Path) -> None:
     responses = [{"id": "art-uuid"}, {}, {"status": "ok"}]
     with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, responses)):
         backend.log_artifact(artifact)
+        backend._upload_pool.shutdown(wait=True)  # noqa: SLF001
     assert reqs[0][0] == "POST" and reqs[0][2]["name"] == "ds"
     assert reqs[1][0] == "PUT" and reqs[1][1].endswith("/artifacts/art-uuid/files/data.json")
     assert reqs[2][0] == "POST" and reqs[2][2] == {"manifest": {"files": ["data.json"], "references": []}}

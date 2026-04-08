@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import datetime, timezone
 from io import BytesIO
@@ -71,6 +73,11 @@ class RemoteBackend:
         self._scalar_buffer: list[dict[str, Any]] = []
         self._next_log_line = 0
         self._next_scalar_line = 0
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
+        self._flush_thread.start()
+        self._upload_pool = ThreadPoolExecutor(max_workers=4)
 
         base = f"{self._api_url}/accounts/{self._handle}/projects/{self._project_name}"
         body: dict[str, Any] = {"runName": run_name, "launchId": launch_id, "workerLabel": worker_label}
@@ -91,17 +98,17 @@ class RemoteBackend:
         if not values:
             return
         ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        self._scalar_buffer.append({"step": step, "values": values, "timestamp": ts})
-        self._flush_scalars()
+        with self._lock:
+            self._scalar_buffer.append({"step": step, "values": values, "timestamp": ts})
 
     def log_lines(self, lines: list[str]) -> None:
         """Append console log lines for the run's worker."""
         if not lines:
             return
         ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        for line in lines:
-            self._log_buffer.append({"timestamp": ts, "content": line.rstrip("\n")})
-        self._flush_logs()
+        with self._lock:
+            for line in lines:
+                self._log_buffer.append({"timestamp": ts, "content": line.rstrip("\n")})
 
     def log_media(self, key: str, step: int | None, media: list[Media]) -> None:
         """Append media files for a run under a shared key and step."""
@@ -124,6 +131,9 @@ class RemoteBackend:
 
     def log_artifact(self, artifact: Artifact) -> None:
         """Store an artifact for a run."""
+        self._upload_pool.submit(self._upload_artifact, artifact)
+
+    def _upload_artifact(self, artifact: Artifact) -> None:
         base = f"{self._api_url}/accounts/{self._handle}/projects/{self._project_name}"
         create_req = artifact.create_request()
         body: dict[str, Any] = {"name": create_req.name, "type": create_req.type, "run_id": self._run_id}
@@ -147,26 +157,36 @@ class RemoteBackend:
 
     def finish(self) -> None:
         """Finalize a run and flush backend state."""
+        self._stop.set()
+        self._flush_thread.join()
+        self._upload_pool.shutdown(wait=True)
         self._flush_logs()
         self._flush_scalars()
         body = {"terminalState": "finished"}
         self._request("PUT", f"{self._api_url}/runs/terminal-state", body, auth="worker")
 
+    def _flush_loop(self) -> None:
+        while not self._stop.wait(timeout=2.0):
+            self._flush_logs()
+            self._flush_scalars()
+
     def _flush_logs(self) -> None:
-        if not self._log_buffer:
-            return
-        body = {"startLine": self._next_log_line, "lines": self._log_buffer}
+        with self._lock:
+            if not self._log_buffer:
+                return
+            logs, self._log_buffer = self._log_buffer, []
+        body = {"startLine": self._next_log_line, "lines": logs}
         resp = self._request("POST", f"{self._api_url}/ingest/logs", body)
         self._next_log_line = resp["nextStartLine"]
-        self._log_buffer.clear()
 
     def _flush_scalars(self) -> None:
-        if not self._scalar_buffer:
-            return
-        body = {"startLine": self._next_scalar_line, "scalars": self._scalar_buffer}
+        with self._lock:
+            if not self._scalar_buffer:
+                return
+            scalars, self._scalar_buffer = self._scalar_buffer, []
+        body = {"startLine": self._next_scalar_line, "scalars": scalars}
         resp = self._request("POST", f"{self._api_url}/ingest/scalars", body)
         self._next_scalar_line = resp["nextStartLine"]
-        self._scalar_buffer.clear()
 
     def _request(
         self, method: str, url: str, body: dict[str, Any] | None = None, *, auth: str = "worker",
