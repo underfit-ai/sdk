@@ -114,7 +114,7 @@ def init(
             worker_label=resolved_worker_label,
         )
 
-    run = Run(project=project, name=backend.run_name, backend=backend, config=resolved_config)
+    run = Run(project=project, name=backend.run_name, backend=backend, config=resolved_config, on_finish=finish)
     _capture_context = _capture_output(backend)
     _capture_context.__enter__()
     return run
@@ -151,7 +151,6 @@ def finish() -> None:
     global run, _capture_context  # noqa: PLW0603
     if run is None:
         return
-
     run.finish()
     if _capture_context is not None:
         _capture_context.__exit__(None, None, None)

@@ -48,7 +48,14 @@ def _join_bytes(chunks: list[bytes]) -> bytes:
 class Run:
     """Represent an Underfit run."""
 
-    def __init__(self, project: str, name: str, backend: Backend, config: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        project: str,
+        name: str,
+        backend: Backend,
+        config: dict[str, Any] | None = None,
+        on_finish: Callable[[], None] | None = None,
+    ) -> None:
         """Initialize a run.
 
         Args:
@@ -56,16 +63,28 @@ class Run:
             name: Run name.
             backend: Backend used to store run data.
             config: Run configuration dictionary.
+            on_finish: Optional callback used when exiting a context.
         """
         self.project = project
         self.name = name
         self.backend = backend
         self.config = {} if config is None else dict(config)
         self._finished = False
+        self._on_finish = on_finish
 
     def _require_active(self) -> None:
         if self._finished:
             raise RuntimeError("run is already finished")
+
+    def __enter__(self) -> Run:  # noqa: PYI034
+        """Return the active run context."""
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        """Finish the run when exiting a context."""
+        if self._on_finish:
+            self._on_finish()
+        self.finish()
 
     def log(self, data: dict[str, Any], step: int | None = None) -> None:
         """Record metrics and media for the run.
