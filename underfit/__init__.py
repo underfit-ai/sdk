@@ -99,6 +99,7 @@ def init(
             project_name=project,
             run_name=resolved_name,
             run_config=resolved_config,
+            worker_label=resolved_worker_label,
             root_dir=root_dir.resolve(),
         )
     else:

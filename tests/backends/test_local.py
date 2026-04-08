@@ -12,7 +12,9 @@ from underfit.backends.local import LocalBackend
 
 def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     """Write local run data in the layout consumed by the API backfill service."""
-    backend = LocalBackend(project_name="Vision", run_name="Trial A", run_config={"lr": 0.01}, root_dir=tmp_path)
+    backend = LocalBackend(
+        project_name="Vision", run_name="Trial A", run_config={"lr": 0.01}, worker_label="worker-7", root_dir=tmp_path,
+    )
 
     backend.log_scalars({"loss": 0.8}, step=1)
     backend.log_lines(["hello", "world\n"])
@@ -31,11 +33,11 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     assert metadata["config"] == {"lr": 0.01}
     assert set(metadata.keys()) == {"project", "name", "config"}
 
-    scalar_path = backend.run_dir / "scalars" / "0" / "raw.jsonl"
+    scalar_path = backend.run_dir / "scalars" / "worker-7" / "r1" / "0.jsonl"
     scalar_lines = [json.loads(line) for line in scalar_path.read_text().splitlines()]
     assert scalar_lines == [{"step": 1, "values": {"loss": 0.8}, "timestamp": scalar_lines[0]["timestamp"]}]
 
-    assert (backend.run_dir / "logs" / "log.log").read_text() == "hello\nworld\n"
+    assert (backend.run_dir / "logs" / "worker-7" / "segments" / "0.log").read_text() == "hello\nworld\n"
 
     artifact_dirs = [p for p in (backend.run_dir / "artifacts").iterdir() if p.is_dir()]
     assert len(artifact_dirs) == 1

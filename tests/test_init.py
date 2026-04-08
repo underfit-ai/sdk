@@ -16,14 +16,14 @@ from underfit.run import Run
 
 def test_init_captures_terminal_output(tmp_path: Path) -> None:
     """Capture stdout and stderr into backend logs."""
-    run = underfit.init("project", log_dir=tmp_path)
+    run = underfit.init("project", log_dir=tmp_path, worker_label="worker-0")
     assert re.match(r"^[a-z]+-[a-z]+$", run.name)
     sys.stdout.write("hello")
     sys.stdout.write(" world\n")
     sys.stderr.write("oops")
     underfit.finish()
     assert isinstance(run.backend, LocalBackend)
-    assert (run.backend.run_dir / "logs" / "log.log").read_text() == "hello world\noops\n"
+    assert (run.backend.run_dir / "logs" / "worker-0" / "segments" / "0.log").read_text() == "hello world\noops\n"
 
 
 @pytest.mark.parametrize(

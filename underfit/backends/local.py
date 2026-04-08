@@ -20,12 +20,15 @@ from underfit.media import Media
 class LocalBackend:
     """Persist run data in local files for offline usage."""
 
+    _RAW_SCALAR_RESOLUTION = 1
+
     def __init__(
         self,
         *,
         project_name: str,
         run_name: str,
         run_config: dict[str, Any],
+        worker_label: str,
         root_dir: str | Path | None = None,
     ) -> None:
         """Initialize a local filesystem backend.
@@ -34,9 +37,11 @@ class LocalBackend:
             project_name: Project name for the run.
             run_name: Run name.
             run_config: Run configuration payload.
+            worker_label: Label identifying this worker.
             root_dir: Root directory for local run data.
         """
         self._run_name = run_name
+        self._worker_label = worker_label
         self.run_dir = Path(root_dir or Path.cwd() / "underfit") / str(uuid4())
         self.run_dir.mkdir(parents=True, exist_ok=True)
         meta = {"project": project_name, "name": self.run_name, "config": run_config}
@@ -56,7 +61,7 @@ class LocalBackend:
         """Append scalar metric values for a run."""
         if not values:
             return
-        path = self.run_dir / "scalars" / "0" / "raw.jsonl"
+        path = self.run_dir / "scalars" / self._worker_label / f"r{self._RAW_SCALAR_RESOLUTION}" / "0.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         with path.open("a", encoding="utf-8") as f:
@@ -67,7 +72,7 @@ class LocalBackend:
         """Append console log lines for the run's worker."""
         if not lines:
             return
-        path = self.run_dir / "logs" / "log.log"
+        path = self.run_dir / "logs" / self._worker_label / "segments" / "0.log"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             for line in lines:
