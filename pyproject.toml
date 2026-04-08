@@ -17,6 +17,7 @@ testing = [
     "ruff",
     "ty",
     "pytest",
+    "pytest-mock",
 ]
 
 [build-system]

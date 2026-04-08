@@ -7,9 +7,11 @@ import sys
 from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
 
 import underfit
 from underfit.backends.local import LocalBackend
+from underfit.run import Run
 
 
 def test_init_captures_terminal_output(tmp_path: Path) -> None:
@@ -24,11 +26,27 @@ def test_init_captures_terminal_output(tmp_path: Path) -> None:
     assert (run.backend.run_dir / "logs" / "log.log").read_text() == "hello world\noops\n"
 
 
-def test_init_supports_context_manager(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("error", "state"),
+    [(None, "finished"), (KeyboardInterrupt, "cancelled"), (RuntimeError, "failed")],
+)
+def test_init_supports_context_manager(
+    tmp_path: Path, mocker: MockerFixture, error: type[BaseException] | None, state: str,
+) -> None:
     """Finish the active run when exiting a context."""
-    with underfit.init("project", log_dir=tmp_path) as run:
-        assert underfit.run is run
+    spy = mocker.spy(Run, "finish")
+
+    def exercise() -> None:
+        with underfit.init("project", log_dir=tmp_path) as run:
+            assert underfit.run is run
+            if error is not None:
+                raise error()
+
+    if error is None:
+        exercise()
+    else:
+        with pytest.raises(error):
+            exercise()
     assert underfit.run is None
-    with pytest.raises(RuntimeError, match="run is already finished"):
-        run.log({"x": 1})
-    assert run.backend.run_dir.exists()
+    spy.assert_called_once()
+    assert spy.call_args.args[1] == state

@@ -13,7 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from underfit.artifact import Artifact
-from underfit.backends import Backend, LocalBackend, RemoteBackend
+from underfit.backends import Backend, LocalBackend, RemoteBackend, TerminalState
 from underfit.lib.terminal import capture
 from underfit.media import Audio, Html, Image, Video
 from underfit.run import PathFilter, PathLike, PathOrBytes, Run
@@ -146,13 +146,13 @@ def log_model(checkpoint: PathOrBytes, *, name: str | None = None) -> Artifact:
     return _require_run().log_model(checkpoint, name=name)
 
 
-def finish() -> None:
+def finish(terminal_state: TerminalState = "finished") -> None:
     """Finish the current run."""
     global run, _capture_context  # noqa: PLW0603
     if run is None:
         return
-    run.finish()
     if _capture_context is not None:
         _capture_context.__exit__(None, None, None)
         _capture_context = None
+    run.finish(terminal_state)
     run = None

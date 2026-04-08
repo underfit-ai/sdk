@@ -5,11 +5,12 @@ from __future__ import annotations
 import subprocess
 from io import BytesIO
 from pathlib import Path
+from types import TracebackType
 from typing import Any, Callable, Union
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from underfit.artifact import Artifact
-from underfit.backends import Backend
+from underfit.backends import Backend, TerminalState
 from underfit.media import Audio, Html, Image, Video
 
 PathLike = Union[str, Path]
@@ -54,7 +55,7 @@ class Run:
         name: str,
         backend: Backend,
         config: dict[str, Any] | None = None,
-        on_finish: Callable[[], None] | None = None,
+        on_finish: Callable[[TerminalState], None] | None = None,
     ) -> None:
         """Initialize a run.
 
@@ -80,11 +81,20 @@ class Run:
         """Return the active run context."""
         return self
 
-    def __exit__(self, *_: object) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        _: BaseException | None,
+        __: TracebackType | None,
+    ) -> None:
         """Finish the run when exiting a context."""
+        terminal_state: TerminalState = "finished"
+        if exc_type is not None:
+            terminal_state = "cancelled" if issubclass(exc_type, KeyboardInterrupt) else "failed"
         if self._on_finish:
-            self._on_finish()
-        self.finish()
+            self._on_finish(terminal_state)
+            return
+        self.finish(terminal_state)
 
     def log(self, data: dict[str, Any], step: int | None = None) -> None:
         """Record metrics and media for the run.
@@ -299,9 +309,9 @@ class Run:
 
         self.backend.log_artifact(artifact)
 
-    def finish(self) -> None:
+    def finish(self, terminal_state: TerminalState = "finished") -> None:
         """Finalize the run."""
         if self._finished:
             return
-        self.backend.finish()
+        self.backend.finish(terminal_state)
         self._finished = True

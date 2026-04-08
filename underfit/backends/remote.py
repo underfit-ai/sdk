@@ -163,7 +163,7 @@ class RemoteBackend:
             if metrics:
                 self.log_scalars(metrics, step=None)
 
-    def finish(self) -> None:
+    def finish(self, terminal_state: str = "finished") -> None:
         """Finalize a run and flush backend state."""
         self._stop.set()
         self._flush_thread.join()
@@ -171,7 +171,7 @@ class RemoteBackend:
         self._upload_pool.shutdown(wait=True)
         self._flush_logs()
         self._flush_scalars()
-        body = {"terminalState": "finished"}
+        body = {"terminalState": terminal_state}
         self._request("PUT", f"{self._api_url}/runs/terminal-state", body, auth="worker")
 
     def _flush_loop(self) -> None:

@@ -121,7 +121,7 @@ class LocalBackend:
             if metrics:
                 self.log_scalars(metrics, step=None)
 
-    def finish(self) -> None:
+    def finish(self, terminal_state: str = "finished") -> None:
         """Finalize a run and flush backend state."""
         self._stop.set()
         if hasattr(self, "_metrics_thread"):

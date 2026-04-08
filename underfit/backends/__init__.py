@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from underfit.artifact import Artifact
 from underfit.backends.local import LocalBackend
 from underfit.backends.remote import RemoteBackend
 from underfit.media import Media
+
+TerminalState = Literal["finished", "failed", "cancelled"]
 
 
 @runtime_checkable
@@ -30,8 +32,8 @@ class Backend(Protocol):
     def log_artifact(self, artifact: Artifact) -> None:
         """Store an artifact for a run."""
 
-    def finish(self) -> None:
+    def finish(self, terminal_state: TerminalState = "finished") -> None:
         """Finalize a run and flush backend state."""
 
 
-__all__ = ["Backend", "LocalBackend", "RemoteBackend"]
+__all__ = ["Backend", "LocalBackend", "RemoteBackend", "TerminalState"]

@@ -24,7 +24,7 @@ class _RecordingBackend(Backend):
         self.scalar_calls: list[tuple[dict[str, float], int | None]] = []
         self.media_calls: list[tuple[str, int | None, list[Media]]] = []
         self.artifact_calls: list[Artifact] = []
-        self.finish_calls = 0
+        self.finish_calls: list[str] = []
 
     @property
     def run_name(self) -> str:
@@ -44,8 +44,8 @@ class _RecordingBackend(Backend):
             raise TypeError("artifact must be an underfit.Artifact")
         self.artifact_calls.append(artifact)
 
-    def finish(self) -> None:
-        self.finish_calls += 1
+    def finish(self, terminal_state: str = "finished") -> None:
+        self.finish_calls.append(terminal_state)
 
 
 def test_run_copies_config_on_init() -> None:
@@ -182,7 +182,7 @@ def test_finish_is_idempotent_and_blocks_future_writes() -> None:
     run.finish()
     run.finish()
 
-    assert backend.finish_calls == 1
+    assert backend.finish_calls == ["finished"]
     with pytest.raises(RuntimeError, match="already finished"):
         run.log({"loss": 1.0})
     with pytest.raises(RuntimeError, match="already finished"):
