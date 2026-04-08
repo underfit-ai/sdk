@@ -6,6 +6,7 @@ import base64
 import json
 import shutil
 import threading
+from concurrent.futures import Future
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -94,7 +95,7 @@ class LocalBackend:
         info = {"key": key, "step": step, "type": payloads[0].get("_type"), "metadata": metadata or None}
         (dest / "media.json").write_text(json.dumps(info, indent=2, sort_keys=True), encoding="utf-8")
 
-    def log_artifact(self, artifact: Artifact) -> None:
+    def log_artifact(self, artifact: Artifact) -> Future[None]:
         """Store an artifact for a run."""
         artifact_dir = self.run_dir / "artifacts" / str(uuid4())
         files_dir = artifact_dir / "files"
@@ -119,6 +120,9 @@ class LocalBackend:
         (artifact_dir / "artifact.json").write_text(json.dumps(info, indent=2, sort_keys=True), encoding="utf-8")
         manifest = json.dumps(asdict(artifact.manifest()), indent=2, sort_keys=True)
         (artifact_dir / "manifest.json").write_text(manifest, encoding="utf-8")
+        future: Future[None] = Future()
+        future.set_result(None)
+        return future
 
     def _metrics_loop(self) -> None:
         while not self._stop.wait(timeout=10.0):

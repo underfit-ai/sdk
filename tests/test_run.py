@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import importlib
 import subprocess
+from concurrent.futures import Future
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
@@ -16,7 +17,7 @@ from underfit.backends import Backend
 from underfit.media import Html, Media
 from underfit.run import Run
 
-run_module = importlib.import_module("underfit.run")
+artifact_module = importlib.import_module("underfit.artifact")
 
 
 class _RecordingBackend(Backend):
@@ -39,10 +40,13 @@ class _RecordingBackend(Backend):
     def log_media(self, key: str, step: int | None, media: list[Media]) -> None:
         self.media_calls.append((key, step, media))
 
-    def log_artifact(self, artifact: Artifact) -> None:
+    def log_artifact(self, artifact: Artifact) -> Future[None]:
         if not isinstance(artifact, Artifact):
             raise TypeError("artifact must be an underfit.Artifact")
         self.artifact_calls.append(artifact)
+        future: Future[None] = Future()
+        future.set_result(None)
+        return future
 
     def finish(self, terminal_state: str = "finished") -> None:
         self.finish_calls.append(terminal_state)
@@ -99,13 +103,11 @@ def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
     skip.write_text("print('skip')\n")
     note.write_text("ignore\n")
 
-    artifact = run.log_code(
+    run.log_code(
         root,
         include=lambda path: path.suffix == ".py",
         exclude=lambda path: path.name == "skip.py",
-    )
-
-    assert artifact.name == "source-code"
+    ).result()
     assert [logged.name for logged in backend.artifact_calls] == ["source-code"]
     uploads = backend.artifact_calls[0].uploads()
     assert isinstance(uploads[0], ArtifactDataUpload)
@@ -139,12 +141,11 @@ def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: p
             return subprocess.CompletedProcess(args, 0, stdout=tracked_patch, stderr=b"")
         raise AssertionError(f"unexpected git command: {command}")
 
-    monkeypatch.setattr(run_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(artifact_module.subprocess, "run", fake_run)
 
-    artifact = run.log_git(repo_root)
-
-    assert artifact.name == "git-state"
-    assert artifact.metadata == {
+    run.log_git(repo_root).result()
+    assert backend.artifact_calls[0].name == "git-state"
+    assert backend.artifact_calls[0].metadata == {
         "commit": "abc123",
         "branch": "main",
         "is_dirty": True,
@@ -162,11 +163,11 @@ def test_log_model_logs_bytes_checkpoint() -> None:
     backend = _RecordingBackend()
     run = Run("project", "run", backend)
 
-    artifact = run.log_model(b"weights")
-
+    run.log_model(b"weights").result()
+    artifact = backend.artifact_calls[0]
     assert artifact.name == "model-checkpoint"
     assert artifact.type == "model"
-    assert backend.artifact_calls == [artifact]
+    assert len(backend.artifact_calls) == 1
     assert len(artifact.uploads()) == 1
     upload = artifact.uploads()[0]
     assert isinstance(upload, ArtifactDataUpload)

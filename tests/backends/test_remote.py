@@ -124,7 +124,7 @@ def test_log_artifact(tmp_path: Path) -> None:
     artifact.add_file(tmp_path / "data.json")
     responses = [{"id": "art-uuid"}, {}, {"status": "ok"}]
     with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, responses)):
-        backend.log_artifact(artifact)
+        backend.log_artifact(artifact).result()
         backend._upload_pool.shutdown(wait=True)  # noqa: SLF001
     assert reqs[0][0] == "POST" and reqs[0][2]["name"] == "ds"
     assert reqs[1][0] == "PUT" and reqs[1][1].endswith("/artifacts/art-uuid/files/data.json")

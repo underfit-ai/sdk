@@ -7,6 +7,7 @@ import random
 import re
 import socket
 from collections.abc import Iterator
+from concurrent.futures import Future
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
@@ -132,17 +133,17 @@ def log_code(
     name: str | None = None,
     include: PathFilter | None = None,
     exclude: PathFilter | None = None
-) -> Artifact:
+) -> Future[None]:
     """Log the source code under a root path to the active run."""
     return _require_run().log_code(root_path, name=name, include=include, exclude=exclude)
 
 
-def log_git(repo_path: PathLike | None = None, *, name: str | None = None) -> Artifact:
+def log_git(repo_path: PathLike | None = None, *, name: str | None = None) -> Future[None]:
     """Log the current git state to the active run."""
     return _require_run().log_git(repo_path, name=name)
 
 
-def log_model(checkpoint: PathOrBytes, *, name: str | None = None) -> Artifact:
+def log_model(checkpoint: PathOrBytes, *, name: str | None = None) -> Future[None]:
     """Log a model checkpoint to the current run."""
     return _require_run().log_model(checkpoint, name=name)
 

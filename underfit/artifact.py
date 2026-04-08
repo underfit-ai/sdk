@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import subprocess
 import unicodedata
 import urllib.error
 import urllib.request
@@ -12,14 +13,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from email.message import Message
 from email.utils import formatdate
+from io import BytesIO
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Callable, Union
 from urllib.parse import unquote, urlparse
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from underfit.media import Media
 
 PathLike = Union[str, Path]
 BytesLike = Union[bytes, bytearray, memoryview]
+PathFilter = Callable[[Path], bool]
 MAX_PATH_BYTES = 1024
 MAX_PATH_SEGMENT_BYTES = 255
 
@@ -117,6 +121,96 @@ class Artifact:
         self._references: list[ArtifactReference] = []
         self._used_paths: set[str] = set()
         self._next_media_index = 1
+
+    @classmethod
+    def from_code(
+        cls,
+        root_path: PathLike | None = None,
+        *,
+        name: str | None = None,
+        include: PathFilter | None = None,
+        exclude: PathFilter | None = None,
+    ) -> Artifact:
+        """Build a source-code artifact from a directory tree."""
+        root = Path.cwd() if root_path is None else Path(root_path)
+        if not root.exists():
+            raise FileNotFoundError(f"root_path does not exist: {root}")
+        if not root.is_dir():
+            raise ValueError(f"root_path must point to a directory: {root}")
+        artifact = cls(name or "source-code", "code")
+        resolved_root = root.resolve()
+        include_match = include or (lambda path: path.suffix == ".py")
+        paths = sorted((path for path in resolved_root.rglob("*") if path.is_file()), key=lambda path: path.as_posix())
+        matched_paths = [path for path in paths if include_match(path) and (exclude is None or not exclude(path))]
+        if matched_paths:
+            buffer = BytesIO()
+            with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
+                for path in matched_paths:
+                    info = ZipInfo(path.relative_to(resolved_root).as_posix())
+                    info.compress_type = ZIP_DEFLATED
+                    info.date_time = (1980, 1, 1, 0, 0, 0)
+                    archive.writestr(info, path.read_bytes())
+            artifact.add_bytes(buffer.getvalue(), name=f"{artifact.name}.zip")
+        return artifact
+
+    @classmethod
+    def from_git(cls, repo_path: PathLike | None = None, *, name: str | None = None) -> Artifact:
+        """Build an artifact describing the current git state."""
+        repo = Path.cwd() if repo_path is None else Path(repo_path)
+        if not repo.exists():
+            raise FileNotFoundError(f"repo_path does not exist: {repo}")
+        if not repo.is_dir():
+            raise ValueError(f"repo_path must point to a directory: {repo}")
+        repo_root = Path(_git_text(repo, ["rev-parse", "--show-toplevel"]))
+        status = _git_text(repo_root, ["status", "--porcelain=v2", "--branch"], ok_returncodes=(0, 128))
+        head = None
+        branch = None
+        untracked_files: list[str] = []
+        for line in status.splitlines():
+            if line.startswith("# branch.oid "):
+                value = line.removeprefix("# branch.oid ")
+                head = None if value == "(initial)" else value
+            elif line.startswith("# branch.head "):
+                value = line.removeprefix("# branch.head ")
+                branch = None if value == "(detached)" else value
+            elif line.startswith("? "):
+                untracked_files.append(line[2:])
+        patch = (
+            _git_output(repo_root, ["diff", "--binary", "HEAD"])
+            if head is not None
+            else _join_bytes([
+                _git_output(repo_root, ["diff", "--binary", "--cached"]),
+                _git_output(repo_root, ["diff", "--binary"]),
+            ])
+        )
+        artifact = cls(name or "git-state", "git", metadata={
+            "commit": head,
+            "branch": branch,
+            "is_dirty": bool(patch) or bool(untracked_files),
+            "untracked_files": untracked_files,
+        })
+        artifact.add_bytes(patch, name="working-tree.patch")
+        return artifact
+
+    @classmethod
+    def from_model(cls, checkpoint: PathLike | BytesLike, *, name: str | None = None) -> Artifact:
+        """Build a model artifact from bytes or a filesystem path."""
+        artifact = cls(name or "model-checkpoint", "model")
+        if isinstance(checkpoint, (bytes, bytearray, memoryview)):
+            artifact.add_bytes(checkpoint, name="checkpoint.bin")
+            return artifact
+        if not isinstance(checkpoint, (str, Path)):
+            raise TypeError("checkpoint must be a path string, Path, or bytes-like object")
+        path = Path(checkpoint)
+        if not path.exists():
+            raise FileNotFoundError(f"checkpoint path does not exist: {path}")
+        if path.is_file():
+            artifact.add_file(path)
+        elif path.is_dir():
+            artifact.add_dir(path)
+        else:
+            raise ValueError(f"checkpoint path must point to a file or directory: {path}")
+        return artifact
 
     def add_file(self, local_path: PathLike, *, name: str | None = None) -> str:
         """Add a file to the artifact.
@@ -376,3 +470,30 @@ class Artifact:
                 except binascii.Error:
                     return candidate
         return None
+
+
+def _git_output(repo_path: Path, args: list[str], *, ok_returncodes: tuple[int, ...] = (0,)) -> bytes:
+    try:
+        result = subprocess.run(["git", *args], cwd=repo_path, capture_output=True, check=False)  # noqa: S603,S607
+    except FileNotFoundError as exc:
+        raise RuntimeError("git is not installed") from exc
+    if result.returncode not in ok_returncodes:
+        command = " ".join(["git", *args])
+        message = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(message or f"{command} failed with exit code {result.returncode}")
+    return result.stdout
+
+
+def _git_text(repo_path: Path, args: list[str], *, ok_returncodes: tuple[int, ...] = (0,)) -> str:
+    return _git_output(repo_path, args, ok_returncodes=ok_returncodes).decode("utf-8").strip()
+
+
+def _join_bytes(chunks: list[bytes]) -> bytes:
+    output = bytearray()
+    for chunk in chunks:
+        if not chunk:
+            continue
+        if output and not output.endswith(b"\n"):
+            output.extend(b"\n")
+        output.extend(chunk)
+    return bytes(output)

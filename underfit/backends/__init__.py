@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future
 from typing import Literal, Protocol, runtime_checkable
 
 from underfit.artifact import Artifact
@@ -29,7 +30,7 @@ class Backend(Protocol):
     def log_media(self, key: str, step: int | None, media: list[Media]) -> None:
         """Append media files for a run under a shared key and step."""
 
-    def log_artifact(self, artifact: Artifact) -> None:
+    def log_artifact(self, artifact: Artifact) -> Future[None]:
         """Store an artifact for a run."""
 
     def finish(self, terminal_state: TerminalState = "finished") -> None:

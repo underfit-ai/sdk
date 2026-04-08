@@ -6,7 +6,7 @@ import base64
 import json
 import threading
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import datetime, timezone
 from io import BytesIO
@@ -132,9 +132,9 @@ class RemoteBackend:
         with urllib.request.urlopen(req) as resp:
             resp.read()
 
-    def log_artifact(self, artifact: Artifact) -> None:
+    def log_artifact(self, artifact: Artifact) -> Future[None]:
         """Store an artifact for a run."""
-        self._upload_pool.submit(self._upload_artifact, artifact)
+        return self._upload_pool.submit(self._upload_artifact, artifact)
 
     def _upload_artifact(self, artifact: Artifact) -> None:
         base = f"{self._api_url}/accounts/{self._handle}/projects/{self._project_name}"

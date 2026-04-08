@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import subprocess
-from io import BytesIO
+from concurrent.futures import Future
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Callable, Union
-from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from underfit.artifact import Artifact
 from underfit.backends import Backend, TerminalState
@@ -16,34 +14,6 @@ from underfit.media import Audio, Html, Image, Video
 PathLike = Union[str, Path]
 PathOrBytes = Union[str, Path, bytes, bytearray, memoryview]
 PathFilter = Callable[[Path], bool]
-
-
-def _git_output(repo_path: Path, args: list[str], *, ok_returncodes: tuple[int, ...] = (0,)) -> bytes:
-    try:
-        result = subprocess.run(["git", *args], cwd=repo_path, capture_output=True, check=False)  # noqa: S603,S607
-    except FileNotFoundError as exc:
-        raise RuntimeError("git is not installed") from exc
-
-    if result.returncode not in ok_returncodes:
-        command = " ".join(["git", *args])
-        message = result.stderr.decode("utf-8", errors="replace").strip()
-        raise RuntimeError(message or f"{command} failed with exit code {result.returncode}")
-    return result.stdout
-
-
-def _git_text(repo_path: Path, args: list[str], *, ok_returncodes: tuple[int, ...] = (0,)) -> str:
-    return _git_output(repo_path, args, ok_returncodes=ok_returncodes).decode("utf-8").strip()
-
-
-def _join_bytes(chunks: list[bytes]) -> bytes:
-    output = bytearray()
-    for chunk in chunks:
-        if not chunk:
-            continue
-        if output and not output.endswith(b"\n"):
-            output.extend(b"\n")
-        output.extend(chunk)
-    return bytes(output)
 
 
 class Run:
@@ -154,7 +124,7 @@ class Run:
         name: str | None = None,
         include: PathFilter | None = None,
         exclude: PathFilter | None = None,
-    ) -> Artifact:
+    ) -> Future[None]:
         """Upload source code under a root path as a zip artifact.
 
         Args:
@@ -165,50 +135,21 @@ class Run:
             exclude: Optional blacklist callable. It receives each resolved
                 absolute file path and returns True to exclude it.
 
-        Returns:
-            Artifact containing a zip archive of matched files from the root path.
-
         Raises:
             FileNotFoundError: If ``root_path`` does not exist.
             RuntimeError: If the run has already been finished.
             ValueError: If ``root_path`` is not a directory.
         """
         self._require_active()
-        root = Path.cwd() if root_path is None else Path(root_path)
-        if not root.exists():
-            raise FileNotFoundError(f"root_path does not exist: {root}")
-        if not root.is_dir():
-            raise ValueError(f"root_path must point to a directory: {root}")
+        artifact = Artifact.from_code(root_path, name=name, include=include, exclude=exclude)
+        return self.log_artifact(artifact)
 
-        resolved_root = root.resolve()
-        artifact = Artifact(name or "source-code", "code")
-        include_match = include or (lambda path: path.suffix == ".py")
-        paths = sorted((path for path in resolved_root.rglob("*") if path.is_file()), key=lambda path: path.as_posix())
-        matched_paths = [path for path in paths if include_match(path) and (exclude is None or not exclude(path))]
-
-        if matched_paths:
-            buffer = BytesIO()
-            with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
-                for path in matched_paths:
-                    entry_name = path.relative_to(resolved_root).as_posix()
-                    info = ZipInfo(entry_name)
-                    info.compress_type = ZIP_DEFLATED
-                    info.date_time = (1980, 1, 1, 0, 0, 0)
-                    archive.writestr(info, path.read_bytes())
-            artifact.add_bytes(buffer.getvalue(), name=f"{artifact.name}.zip")
-
-        self.log_artifact(artifact)
-        return artifact
-
-    def log_git(self, repo_path: PathLike | None = None, *, name: str | None = None) -> Artifact:
+    def log_git(self, repo_path: PathLike | None = None, *, name: str | None = None) -> Future[None]:
         """Upload the current git state as an artifact.
 
         Args:
             repo_path: Git repository path. Defaults to the current working directory.
             name: Optional artifact name.
-
-        Returns:
-            Artifact containing the working tree patch and git metadata.
 
         Raises:
             FileNotFoundError: If ``repo_path`` does not exist.
@@ -217,55 +158,15 @@ class Run:
             ValueError: If ``repo_path`` is not a directory.
         """
         self._require_active()
-        repo = Path.cwd() if repo_path is None else Path(repo_path)
-        if not repo.exists():
-            raise FileNotFoundError(f"repo_path does not exist: {repo}")
-        if not repo.is_dir():
-            raise ValueError(f"repo_path must point to a directory: {repo}")
+        artifact = Artifact.from_git(repo_path, name=name)
+        return self.log_artifact(artifact)
 
-        repo_root = Path(_git_text(repo, ["rev-parse", "--show-toplevel"]))
-        status = _git_text(repo_root, ["status", "--porcelain=v2", "--branch"], ok_returncodes=(0, 128))
-        head = None
-        branch = None
-        untracked_files: list[str] = []
-
-        for line in status.splitlines():
-            if line.startswith("# branch.oid "):
-                value = line.removeprefix("# branch.oid ")
-                head = None if value == "(initial)" else value
-            elif line.startswith("# branch.head "):
-                value = line.removeprefix("# branch.head ")
-                branch = None if value == "(detached)" else value
-            elif line.startswith("? "):
-                untracked_files.append(line[2:])
-
-        patch = (
-            _git_output(repo_root, ["diff", "--binary", "HEAD"])
-            if head is not None
-            else _join_bytes([
-                _git_output(repo_root, ["diff", "--binary", "--cached"]),
-                _git_output(repo_root, ["diff", "--binary"]),
-            ])
-        )
-        artifact = Artifact(name or "git-state", "git", metadata={
-            "commit": head,
-            "branch": branch,
-            "is_dirty": bool(patch) or bool(untracked_files),
-            "untracked_files": untracked_files,
-        })
-        artifact.add_bytes(patch, name="working-tree.patch")
-        self.log_artifact(artifact)
-        return artifact
-
-    def log_model(self, checkpoint: PathOrBytes, *, name: str | None = None) -> Artifact:
+    def log_model(self, checkpoint: PathOrBytes, *, name: str | None = None) -> Future[None]:
         """Upload a model checkpoint as an artifact.
 
         Args:
             checkpoint: Model checkpoint as a file path, directory path, or byte buffer.
             name: Optional artifact name.
-
-        Returns:
-            Artifact containing the model checkpoint.
 
         Raises:
             FileNotFoundError: If a path checkpoint does not exist.
@@ -274,26 +175,10 @@ class Run:
             ValueError: If a path checkpoint is neither a file nor directory.
         """
         self._require_active()
-        artifact = Artifact(name or "model-checkpoint", "model")
-        if isinstance(checkpoint, (bytes, bytearray, memoryview)):
-            artifact.add_bytes(checkpoint, name="checkpoint.bin")
-        elif isinstance(checkpoint, (str, Path)):
-            path = Path(checkpoint)
-            if not path.exists():
-                raise FileNotFoundError(f"checkpoint path does not exist: {path}")
-            if path.is_file():
-                artifact.add_file(path)
-            elif path.is_dir():
-                artifact.add_dir(path)
-            else:
-                raise ValueError(f"checkpoint path must point to a file or directory: {path}")
-        else:
-            raise TypeError("checkpoint must be a path string, Path, or bytes-like object")
+        artifact = Artifact.from_model(checkpoint, name=name)
+        return self.log_artifact(artifact)
 
-        self.log_artifact(artifact)
-        return artifact
-
-    def log_artifact(self, artifact: Artifact) -> None:
+    def log_artifact(self, artifact: Artifact) -> Future[None]:
         """Upload an artifact to the backend.
 
         Args:
@@ -306,8 +191,7 @@ class Run:
         self._require_active()
         if not isinstance(artifact, Artifact):
             raise TypeError("artifact must be an underfit.Artifact")
-
-        self.backend.log_artifact(artifact)
+        return self.backend.log_artifact(artifact)
 
     def finish(self, terminal_state: TerminalState = "finished") -> None:
         """Finalize the run."""
