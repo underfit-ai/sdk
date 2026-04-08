@@ -78,9 +78,10 @@ class RemoteBackend:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._metrics = SystemMetrics()
-        self._metrics_tick = 0
         self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
         self._flush_thread.start()
+        self._metrics_thread = threading.Thread(target=self._metrics_loop, daemon=True)
+        self._metrics_thread.start()
         self._upload_pool = ThreadPoolExecutor(max_workers=4)
 
         base = f"{self._api_url}/accounts/{self._handle}/projects/{self._project_name}"
@@ -156,17 +157,18 @@ class RemoteBackend:
         url = f"{self._api_url}/artifacts/{artifact_id}/finalize"
         self._request("POST", url, {"manifest": manifest}, auth="api_key")
 
-    def _sample_metrics(self) -> None:
-        self._metrics_tick += 1
-        if self._metrics.available and self._metrics_tick % 5 == 0:
-            metrics = self._metrics.sample()
-            if metrics:
-                self.log_scalars(metrics, step=None)
+    def _metrics_loop(self) -> None:
+        while not self._stop.wait(timeout=10.0):
+            if self._metrics.available:
+                metrics = self._metrics.sample()
+                if metrics:
+                    self.log_scalars(metrics, step=None)
 
     def finish(self, terminal_state: str = "finished") -> None:
         """Finalize a run and flush backend state."""
         self._stop.set()
         self._flush_thread.join()
+        self._metrics_thread.join()
         self._metrics.shutdown()
         self._upload_pool.shutdown(wait=True)
         self._flush_logs()
@@ -176,27 +178,30 @@ class RemoteBackend:
 
     def _flush_loop(self) -> None:
         while not self._stop.wait(timeout=2.0):
-            self._flush_logs()
-            self._sample_metrics()
-            self._flush_scalars()
+            flushed = self._flush_logs()
+            flushed = self._flush_scalars() or flushed
+            if not flushed:
+                self._request("POST", f"{self._api_url}/workers/heartbeat")
 
-    def _flush_logs(self) -> None:
+    def _flush_logs(self) -> bool:
         with self._lock:
             if not self._log_buffer:
-                return
+                return False
             logs, self._log_buffer = self._log_buffer, []
         body = {"startLine": self._next_log_line, "lines": logs}
         resp = self._request("POST", f"{self._api_url}/ingest/logs", body)
         self._next_log_line = resp["nextStartLine"]
+        return True
 
-    def _flush_scalars(self) -> None:
+    def _flush_scalars(self) -> bool:
         with self._lock:
             if not self._scalar_buffer:
-                return
+                return False
             scalars, self._scalar_buffer = self._scalar_buffer, []
         body = {"startLine": self._next_scalar_line, "scalars": scalars}
         resp = self._request("POST", f"{self._api_url}/ingest/scalars", body)
         self._next_scalar_line = resp["nextStartLine"]
+        return True
 
     def _request(
         self, method: str, url: str, body: dict[str, Any] | None = None, *, auth: str = "worker",
