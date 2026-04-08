@@ -77,7 +77,8 @@ def init(
     """Initialize a new Underfit run.
 
     Args:
-        project: Project name.
+        project: Project identifier as either ``"<account-handle>/<project-name>"`` or a bare
+            ``"<project-name>"``. Bare names resolve to projects owned by the authenticated user.
         name: Optional run name. When omitted a random name is generated.
         config: Run configuration dictionary.
         log_dir: Directory for local run logs. Defaults to ``./underfit``.

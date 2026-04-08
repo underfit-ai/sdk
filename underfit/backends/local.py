@@ -46,8 +46,8 @@ class LocalBackend:
         self._worker_label = worker_label
         self.run_dir = Path(root_dir or Path.cwd() / "underfit") / str(uuid4())
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        meta = {"project": project_name, "name": self.run_name, "config": run_config}
-        (self.run_dir / "run.json").write_text(json.dumps(meta, indent=2, sort_keys=True), encoding="utf-8")
+        self._run_meta = {"project": project_name, "name": self.run_name, "config": run_config}
+        self._write_run_meta()
         self._metrics = SystemMetrics()
         self._stop = threading.Event()
         if self._metrics.available:
@@ -134,3 +134,8 @@ class LocalBackend:
         if hasattr(self, "_metrics_thread"):
             self._metrics_thread.join()
         self._metrics.shutdown()
+        self._run_meta["terminal_state"] = terminal_state
+        self._write_run_meta()
+
+    def _write_run_meta(self) -> None:
+        (self.run_dir / "run.json").write_text(json.dumps(self._run_meta, indent=2, sort_keys=True), encoding="utf-8")

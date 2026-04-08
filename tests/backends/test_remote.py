@@ -43,11 +43,16 @@ def _mock_urlopen(requests: list[tuple[str, str, Any]], responses: list[dict[str
     return handler
 
 
-def _create_backend(requests: list[tuple[str, str, Any]]) -> RemoteBackend:
-    init_responses = [{"id": "run-uuid", "name": "server-name", "workerToken": "wt-123"}]
+def _create_backend(
+    requests: list[tuple[str, str, Any]],
+    *,
+    project: str = "owner/proj",
+    init_responses: list[dict[str, Any]] | None = None,
+) -> RemoteBackend:
+    init_responses = init_responses or [{"id": "run-uuid", "name": "server-name", "workerToken": "wt-123"}]
     with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(requests, init_responses)):
         backend = RemoteBackend(
-            api_url=API_URL, api_key=API_KEY, project="owner/proj", run_name="my-run",
+            api_url=API_URL, api_key=API_KEY, project=project, run_name="my-run",
             launch_id="launch-1", run_config={"lr": 0.01}, worker_label="gpu-0",
         )
     backend._stop.set()  # noqa: SLF001
@@ -64,6 +69,17 @@ def test_launch_run() -> None:
     assert method == "POST"
     assert url == f"{API_URL}/accounts/owner/projects/proj/runs/launch"
     assert body == {"runName": "my-run", "launchId": "launch-1", "workerLabel": "gpu-0", "config": {"lr": 0.01}}
+
+
+def test_launch_run_resolves_bare_project_name() -> None:
+    """Resolve bare project names through the authenticated user."""
+    requests: list[tuple[str, str, Any]] = []
+    _create_backend(requests, project="proj", init_responses=[
+        {"handle": "owner"},
+        {"id": "run-uuid", "name": "server-name", "workerToken": "wt-123"},
+    ])
+    assert requests[0][0:2] == ("GET", f"{API_URL}/me")
+    assert requests[1][0:2] == ("POST", f"{API_URL}/accounts/owner/projects/proj/runs/launch")
 
 
 def test_log_scalars() -> None:

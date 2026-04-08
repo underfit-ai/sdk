@@ -53,7 +53,8 @@ class RemoteBackend:
         Args:
             api_url: Base URL for the Underfit API.
             api_key: API key for authentication.
-            project: Project identifier as ``"owner/project-name"``.
+            project: Project identifier as either ``"<account-handle>/<project-name>"`` or a bare
+                ``"<project-name>"``. Bare names resolve to projects owned by the authenticated user.
             run_name: Run name for the launch request.
             launch_id: Launch ID grouping workers in a single run.
             run_config: Run configuration payload.
@@ -61,6 +62,9 @@ class RemoteBackend:
         """
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key
+        if "/" not in project:
+            user = self._request("GET", f"{self._api_url}/me", auth="api_key")
+            project = f"{user['handle']}/{project}"
         self._handle, self._project_name = project.split("/", 1)
         self._runs_url = f"{self._api_url}/accounts/{self._handle}/projects/{self._project_name}/runs"
         self._log_buffer: list[dict[str, Any]] = []
