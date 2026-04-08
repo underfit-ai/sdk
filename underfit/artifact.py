@@ -29,18 +29,8 @@ MAX_PATH_SEGMENT_BYTES = 255
 
 
 @dataclass(frozen=True)
-class ArtifactCreate:
-    """Represent the payload used to create an artifact."""
-
-    name: str
-    type: str  # noqa: A003
-    metadata: dict[str, Any] | None
-
-
-@dataclass(frozen=True)
 class ArtifactPathUpload:
     """Represent a queued file upload sourced from a local file."""
-
     path: str
     source_path: str
 
@@ -48,18 +38,13 @@ class ArtifactPathUpload:
 @dataclass(frozen=True)
 class ArtifactDataUpload:
     """Represent a queued file upload sourced from in-memory data."""
-
     path: str
     data: str
-
-
-ArtifactUpload = Union[ArtifactPathUpload, ArtifactDataUpload]
 
 
 @dataclass(frozen=True)
 class ArtifactReference:
     """Represent an external artifact reference."""
-
     url: str
     size: int | None = None
     sha256: str | None = None
@@ -70,9 +55,11 @@ class ArtifactReference:
 @dataclass(frozen=True)
 class ArtifactManifest:
     """Represent the finalized artifact manifest."""
-
     files: list[str]
     references: list[ArtifactReference]
+
+
+ArtifactUpload = Union[ArtifactPathUpload, ArtifactDataUpload]
 
 
 class Artifact:
@@ -91,6 +78,7 @@ class Artifact:
         name: str,
         type: str,  # noqa: A002
         metadata: Mapping[str, Any] | None = None,
+        step: int | None = None,
     ) -> None:
         """Initialize an artifact.
 
@@ -98,6 +86,7 @@ class Artifact:
             name: Artifact name.
             type: Artifact type such as ``"dataset"`` or ``"model"``.
             metadata: Optional metadata dictionary.
+            step: Optional global step for the artifact.
 
         Raises:
             TypeError: If ``name`` or ``type`` are not strings or metadata is not a mapping.
@@ -117,6 +106,7 @@ class Artifact:
         self.name = name
         self.type = type
         self.metadata = dict(metadata or {})
+        self.step = step
         self._upload_files: list[ArtifactUpload] = []
         self._references: list[ArtifactReference] = []
         self._used_paths: set[str] = set()
@@ -193,9 +183,11 @@ class Artifact:
         return artifact
 
     @classmethod
-    def from_model(cls, checkpoint: PathLike | BytesLike, *, name: str | None = None) -> Artifact:
+    def from_model(
+        cls, checkpoint: PathLike | BytesLike, *, name: str | None = None, step: int | None = None,
+    ) -> Artifact:
         """Build a model artifact from bytes or a filesystem path."""
-        artifact = cls(name or "model-checkpoint", "model")
+        artifact = cls(name or "model-checkpoint", "model", step=step)
         if isinstance(checkpoint, (bytes, bytearray, memoryview)):
             artifact.add_bytes(checkpoint, name="checkpoint.bin")
             return artifact
@@ -336,10 +328,6 @@ class Artifact:
             self._references.append(self._http_reference(url))
         else:
             self._references.append(ArtifactReference(url=url))
-
-    def create_request(self) -> ArtifactCreate:
-        """Return the typed payload used to create the artifact."""
-        return ArtifactCreate(name=self.name, type=self.type, metadata=self.metadata or None)
 
     def uploads(self) -> list[ArtifactUpload]:
         """Return files that should be uploaded before finalizing the artifact."""

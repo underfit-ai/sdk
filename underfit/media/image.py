@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import base64
-import mimetypes
 from pathlib import Path
 from typing import Any, Union
+
+from underfit.media._helpers import infer_media_file_type, validate_media_path
 
 PathLikeOrBytes = Union[str, Path, bytes, bytearray, memoryview]
 
@@ -61,7 +62,7 @@ class Image:
 
         if isinstance(data_or_path, (str, Path)):
             path = Path(data_or_path)
-            self._validate_path(path, "image")
+            validate_media_path(path, "image", "an image")
         elif isinstance(data_or_path, (bytes, bytearray, memoryview)):
             data = bytes(data_or_path)
         else:
@@ -70,7 +71,7 @@ class Image:
         self.path = path
         self.data = data
         self.caption = caption
-        self.file_type = file_type or (self._infer_file_type(path, "image") if path else None)
+        self.file_type = file_type or (infer_media_file_type(path, "image") if path else None)
         self.width = width
         self.height = height
 
@@ -94,23 +95,3 @@ class Image:
             payload["data"] = base64.b64encode(self.data).decode("ascii")
 
         return {key: value for key, value in payload.items() if value is not None}
-
-    @staticmethod
-    def _validate_path(path: Path, expected_prefix: str) -> None:
-        if not path.exists():
-            raise FileNotFoundError(f"path does not exist: {path}")
-        if not path.is_file():
-            raise ValueError(f"path must point to a file: {path}")
-        mime, _ = mimetypes.guess_type(path.as_posix())
-        if mime is None or not mime.startswith(f"{expected_prefix}/"):
-            raise ValueError(f"path must be an {expected_prefix} file: {path}")
-
-    @staticmethod
-    def _infer_file_type(path: Path, expected_prefix: str) -> str:
-        suffix = path.suffix.lstrip(".").lower()
-        if suffix:
-            return suffix
-        mime, _ = mimetypes.guess_type(path.as_posix())
-        if mime is None or not mime.startswith(f"{expected_prefix}/"):
-            raise ValueError(f"unable to infer file type from path: {path}")
-        return mime.split("/")[-1]

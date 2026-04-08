@@ -12,7 +12,6 @@ import pytest
 
 from underfit.artifact import (
     Artifact,
-    ArtifactCreate,
     ArtifactDataUpload,
     ArtifactManifest,
     ArtifactPathUpload,
@@ -21,8 +20,8 @@ from underfit.artifact import (
 from underfit.media import Html
 
 
-def test_artifact_builds_create_request_uploads_and_manifest(tmp_path: Path) -> None:
-    """Collect typed artifact data before backend serialization."""
+def test_artifact_collects_uploads_and_manifest(tmp_path: Path) -> None:
+    """Collect artifact data before backend serialization."""
     metrics = tmp_path / "metrics.json"
     metrics.write_text('{"loss": 0.1}\n')
     model_card = tmp_path / "model-card.txt"
@@ -40,7 +39,6 @@ def test_artifact_builds_create_request_uploads_and_manifest(tmp_path: Path) -> 
     artifact.add_bytes(b"weights", name="weights.bin")
     artifact.add_url(model_card.as_uri())
 
-    assert artifact.create_request() == ArtifactCreate(name="checkpoint", type="model", metadata={"tag": "best"})
     assert artifact.uploads() == [
         ArtifactPathUpload(path="reports/metrics.json", source_path=str(metrics)),
         ArtifactPathUpload(path="files/a.txt", source_path=str(bundle / "a.txt")),
@@ -69,6 +67,8 @@ def test_artifact_add_media_uses_uploadable_file_content() -> None:
         ArtifactDataUpload(path="media-1.html", data=base64.b64encode(b"<h1>ok</h1>").decode("ascii")),
     ]
     assert artifact.manifest() == ArtifactManifest(files=["media-1.html"], references=[])
+
+
 def test_artifact_rejects_invalid_and_conflicting_paths() -> None:
     """Reject artifact paths that the API would not accept."""
     artifact = Artifact("report", "report")

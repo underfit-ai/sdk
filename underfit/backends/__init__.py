@@ -17,9 +17,7 @@ TerminalState = Literal["finished", "failed", "cancelled"]
 class Backend(Protocol):
     """Define the backend contract used by ``underfit.Run``."""
 
-    @property
-    def run_name(self) -> str:
-        """Return the normalized backend run name."""
+    run_name: str
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
         """Append scalar metric values for a run."""

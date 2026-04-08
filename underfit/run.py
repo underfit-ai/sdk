@@ -161,12 +161,13 @@ class Run:
         artifact = Artifact.from_git(repo_path, name=name)
         return self.log_artifact(artifact)
 
-    def log_model(self, checkpoint: PathOrBytes, *, name: str | None = None) -> Future[None]:
+    def log_model(self, checkpoint: PathOrBytes, *, name: str | None = None, step: int | None = None) -> Future[None]:
         """Upload a model checkpoint as an artifact.
 
         Args:
             checkpoint: Model checkpoint as a file path, directory path, or byte buffer.
             name: Optional artifact name.
+            step: Optional global step for the artifact.
 
         Raises:
             FileNotFoundError: If a path checkpoint does not exist.
@@ -175,7 +176,7 @@ class Run:
             ValueError: If a path checkpoint is neither a file nor directory.
         """
         self._require_active()
-        artifact = Artifact.from_model(checkpoint, name=name)
+        artifact = Artifact.from_model(checkpoint, name=name, step=step)
         return self.log_artifact(artifact)
 
     def log_artifact(self, artifact: Artifact) -> Future[None]:

@@ -126,7 +126,9 @@ def test_log_artifact(tmp_path: Path) -> None:
     with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, responses)):
         backend.log_artifact(artifact).result()
         backend._upload_pool.shutdown(wait=True)  # noqa: SLF001
-    assert reqs[0][0] == "POST" and reqs[0][2]["name"] == "ds"
+    assert reqs[0][0] == "POST"
+    assert reqs[0][1] == f"{API_URL}/accounts/owner/projects/proj/runs/server-name/artifacts"
+    assert reqs[0][2] == {"name": "ds", "type": "dataset"}
     assert reqs[1][0] == "PUT" and reqs[1][1].endswith("/artifacts/art-uuid/files/data.json")
     assert reqs[2][0] == "POST" and reqs[2][2] == {"manifest": {"files": ["data.json"], "references": []}}
 

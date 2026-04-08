@@ -17,16 +17,7 @@ from uuid import uuid4
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.lib.metrics import SystemMetrics
 from underfit.media import Media
-
-
-def _extract_media_content(payload: dict[str, Any]) -> bytes:
-    if "path" in payload and payload["path"] is not None:
-        return Path(payload["path"]).read_bytes()
-    if "data" in payload and payload["data"] is not None:
-        return base64.b64decode(payload["data"])
-    if "html" in payload and payload["html"] is not None:
-        return str(payload["html"]).encode("utf-8")
-    raise RuntimeError("media payload is missing content")
+from underfit.media._helpers import extract_media_content
 
 
 def _multipart_body(metadata: dict[str, Any], files: list[bytes]) -> tuple[bytes, str]:
@@ -71,6 +62,7 @@ class RemoteBackend:
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key
         self._handle, self._project_name = project.split("/", 1)
+        self._runs_url = f"{self._api_url}/accounts/{self._handle}/projects/{self._project_name}/runs"
         self._log_buffer: list[dict[str, Any]] = []
         self._scalar_buffer: list[dict[str, Any]] = []
         self._next_log_line = 0
@@ -80,23 +72,17 @@ class RemoteBackend:
         self._metrics = SystemMetrics()
         self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
         self._flush_thread.start()
-        self._metrics_thread = threading.Thread(target=self._metrics_loop, daemon=True)
-        self._metrics_thread.start()
+        if self._metrics.available:
+            self._metrics_thread = threading.Thread(target=self._metrics_loop, daemon=True)
+            self._metrics_thread.start()
         self._upload_pool = ThreadPoolExecutor(max_workers=4)
 
-        base = f"{self._api_url}/accounts/{self._handle}/projects/{self._project_name}"
         body: dict[str, Any] = {"runName": run_name, "launchId": launch_id, "workerLabel": worker_label}
         if run_config:
             body["config"] = run_config
-        resp = self._request("POST", f"{base}/runs/launch", body, auth="api_key")
-        self._run_name = resp["name"]
-        self._run_id = resp["id"]
+        resp = self._request("POST", f"{self._runs_url}/launch", body, auth="api_key")
+        self.run_name = resp["name"]
         self._worker_token = resp["workerToken"]
-
-    @property
-    def run_name(self) -> str:
-        """Return the normalized backend run name."""
-        return self._run_name
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
         """Append scalar metric values for a run."""
@@ -125,7 +111,7 @@ class RemoteBackend:
         extra = {k: v for k, v in payloads[0].items() if k not in excluded and v is not None}
         if extra:
             meta["metadata"] = extra
-        data, content_type = _multipart_body(meta, [_extract_media_content(p) for p in payloads])
+        data, content_type = _multipart_body(meta, [extract_media_content(payload) for payload in payloads])
         req = urllib.request.Request(f"{self._api_url}/ingest/media", data=data, method="POST")
         req.add_header("Authorization", f"Bearer {self._worker_token}")
         req.add_header("Content-Type", content_type)
@@ -136,45 +122,24 @@ class RemoteBackend:
         """Store an artifact for a run."""
         return self._upload_pool.submit(self._upload_artifact, artifact)
 
-    def _upload_artifact(self, artifact: Artifact) -> None:
-        base = f"{self._api_url}/accounts/{self._handle}/projects/{self._project_name}"
-        create_req = artifact.create_request()
-        body: dict[str, Any] = {"name": create_req.name, "type": create_req.type, "run_id": self._run_id}
-        if create_req.metadata:
-            body["metadata"] = create_req.metadata
-        created = self._request("POST", f"{base}/artifacts", body, auth="api_key")
-        artifact_id = created["id"]
-        for upload in artifact.uploads():
-            if isinstance(upload, ArtifactPathUpload):
-                file_data = Path(upload.source_path).read_bytes()
-            elif isinstance(upload, ArtifactDataUpload):
-                file_data = base64.b64decode(upload.data)
-            else:
-                raise RuntimeError("Artifact upload is missing file content")
-            url = f"{self._api_url}/artifacts/{artifact_id}/files/{upload.path}"
-            self._request_raw("PUT", url, file_data, auth="api_key")
-        manifest = asdict(artifact.manifest())
-        url = f"{self._api_url}/artifacts/{artifact_id}/finalize"
-        self._request("POST", url, {"manifest": manifest}, auth="api_key")
-
-    def _metrics_loop(self) -> None:
-        while not self._stop.wait(timeout=10.0):
-            if self._metrics.available:
-                metrics = self._metrics.sample()
-                if metrics:
-                    self.log_scalars(metrics, step=None)
-
     def finish(self, terminal_state: str = "finished") -> None:
         """Finalize a run and flush backend state."""
         self._stop.set()
         self._flush_thread.join()
-        self._metrics_thread.join()
+        if hasattr(self, "_metrics_thread"):
+            self._metrics_thread.join()
         self._metrics.shutdown()
         self._upload_pool.shutdown(wait=True)
         self._flush_logs()
         self._flush_scalars()
         body = {"terminalState": terminal_state}
         self._request("PUT", f"{self._api_url}/runs/terminal-state", body, auth="worker")
+
+    def _metrics_loop(self) -> None:
+        while not self._stop.wait(timeout=10.0):
+            metrics = self._metrics.sample()
+            if metrics:
+                self.log_scalars(metrics, step=None)
 
     def _flush_loop(self) -> None:
         while not self._stop.wait(timeout=2.0):
@@ -202,6 +167,26 @@ class RemoteBackend:
         resp = self._request("POST", f"{self._api_url}/ingest/scalars", body)
         self._next_scalar_line = resp["nextStartLine"]
         return True
+
+    def _upload_artifact(self, artifact: Artifact) -> None:
+        body: dict[str, Any] = {"name": artifact.name, "type": artifact.type}
+        if artifact.metadata:
+            body["metadata"] = artifact.metadata
+        if artifact.step is not None:
+            body["step"] = artifact.step
+        created = self._request("POST", f"{self._runs_url}/{self.run_name}/artifacts", body, auth="api_key")
+        for upload in artifact.uploads():
+            if isinstance(upload, ArtifactPathUpload):
+                file_data = Path(upload.source_path).read_bytes()
+            elif isinstance(upload, ArtifactDataUpload):
+                file_data = base64.b64decode(upload.data)
+            else:
+                raise RuntimeError("Artifact upload is missing file content")
+            url = f"{self._api_url}/artifacts/{created['id']}/files/{upload.path}"
+            self._request_raw("PUT", url, file_data, auth="api_key")
+        manifest = asdict(artifact.manifest())
+        url = f"{self._api_url}/artifacts/{created['id']}/finalize"
+        self._request("POST", url, {"manifest": manifest}, auth="api_key")
 
     def _request(
         self, method: str, url: str, body: dict[str, Any] | None = None, *, auth: str = "worker",

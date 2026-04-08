@@ -143,9 +143,9 @@ def log_git(repo_path: PathLike | None = None, *, name: str | None = None) -> Fu
     return _require_run().log_git(repo_path, name=name)
 
 
-def log_model(checkpoint: PathOrBytes, *, name: str | None = None) -> Future[None]:
+def log_model(checkpoint: PathOrBytes, *, name: str | None = None, step: int | None = None) -> Future[None]:
     """Log a model checkpoint to the current run."""
-    return _require_run().log_model(checkpoint, name=name)
+    return _require_run().log_model(checkpoint, name=name, step=step)
 
 
 def finish(terminal_state: TerminalState = "finished") -> None:

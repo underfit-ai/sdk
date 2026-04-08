@@ -16,6 +16,7 @@ from uuid import uuid4
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.lib.metrics import SystemMetrics
 from underfit.media import Media
+from underfit.media._helpers import extract_media_content
 
 
 class LocalBackend:
@@ -41,7 +42,7 @@ class LocalBackend:
             worker_label: Label identifying this worker.
             root_dir: Root directory for local run data.
         """
-        self._run_name = run_name
+        self.run_name = run_name
         self._worker_label = worker_label
         self.run_dir = Path(root_dir or Path.cwd() / "underfit") / str(uuid4())
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -52,11 +53,6 @@ class LocalBackend:
         if self._metrics.available:
             self._metrics_thread = threading.Thread(target=self._metrics_loop, daemon=True)
             self._metrics_thread.start()
-
-    @property
-    def run_name(self) -> str:
-        """Return the normalized backend run name."""
-        return self._run_name
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
         """Append scalar metric values for a run."""
@@ -89,7 +85,7 @@ class LocalBackend:
         dest = self.run_dir / "media" / str(uuid4())
         dest.mkdir(parents=True, exist_ok=True)
         for idx, payload in enumerate(payloads):
-            (dest / str(idx)).write_bytes(self._extract_media_content(payload))
+            (dest / str(idx)).write_bytes(extract_media_content(payload))
         excluded = {"_type", "path", "data", "html"}
         metadata = {k: v for k, v in payloads[0].items() if k not in excluded and v is not None}
         info = {"key": key, "step": step, "type": payloads[0].get("_type"), "metadata": metadata or None}
@@ -117,6 +113,8 @@ class LocalBackend:
                 raise RuntimeError("Artifact upload is missing file content")
 
         info = {"name": artifact.name, "type": artifact.type, "metadata": artifact.metadata or None}
+        if artifact.step is not None:
+            info["step"] = artifact.step
         (artifact_dir / "artifact.json").write_text(json.dumps(info, indent=2, sort_keys=True), encoding="utf-8")
         manifest = json.dumps(asdict(artifact.manifest()), indent=2, sort_keys=True)
         (artifact_dir / "manifest.json").write_text(manifest, encoding="utf-8")
@@ -136,13 +134,3 @@ class LocalBackend:
         if hasattr(self, "_metrics_thread"):
             self._metrics_thread.join()
         self._metrics.shutdown()
-
-    @staticmethod
-    def _extract_media_content(payload: dict[str, Any]) -> bytes:
-        if "path" in payload and payload["path"] is not None:
-            return Path(payload["path"]).read_bytes()
-        if "data" in payload and payload["data"] is not None:
-            return base64.b64decode(payload["data"])
-        if "html" in payload and payload["html"] is not None:
-            return str(payload["html"]).encode("utf-8")
-        raise RuntimeError("media payload is missing content")
