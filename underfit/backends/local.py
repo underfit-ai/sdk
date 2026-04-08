@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import shutil
+import threading
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
+from underfit.lib.metrics import SystemMetrics
 from underfit.media import Media
 
 
@@ -39,6 +41,11 @@ class LocalBackend:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         meta = {"project": project_name, "name": self.run_name, "config": run_config}
         (self.run_dir / "run.json").write_text(json.dumps(meta, indent=2, sort_keys=True), encoding="utf-8")
+        self._metrics = SystemMetrics()
+        self._stop = threading.Event()
+        if self._metrics.available:
+            self._metrics_thread = threading.Thread(target=self._metrics_loop, daemon=True)
+            self._metrics_thread.start()
 
     @property
     def run_name(self) -> str:
@@ -108,8 +115,18 @@ class LocalBackend:
         manifest = json.dumps(asdict(artifact.manifest()), indent=2, sort_keys=True)
         (artifact_dir / "manifest.json").write_text(manifest, encoding="utf-8")
 
+    def _metrics_loop(self) -> None:
+        while not self._stop.wait(timeout=10.0):
+            metrics = self._metrics.sample()
+            if metrics:
+                self.log_scalars(metrics, step=None)
+
     def finish(self) -> None:
         """Finalize a run and flush backend state."""
+        self._stop.set()
+        if hasattr(self, "_metrics_thread"):
+            self._metrics_thread.join()
+        self._metrics.shutdown()
 
     @staticmethod
     def _extract_media_content(payload: dict[str, Any]) -> bytes:

@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
+from underfit.lib.metrics import SystemMetrics
 from underfit.media import Media
 
 
@@ -75,6 +76,8 @@ class RemoteBackend:
         self._next_scalar_line = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._metrics = SystemMetrics()
+        self._metrics_tick = 0
         self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
         self._flush_thread.start()
         self._upload_pool = ThreadPoolExecutor(max_workers=4)
@@ -155,10 +158,18 @@ class RemoteBackend:
             "POST", f"{self._api_url}/artifacts/{artifact_id}/finalize", {"manifest": manifest}, auth="api_key",
         )
 
+    def _sample_metrics(self) -> None:
+        self._metrics_tick += 1
+        if self._metrics.available and self._metrics_tick % 5 == 0:
+            metrics = self._metrics.sample()
+            if metrics:
+                self.log_scalars(metrics, step=None)
+
     def finish(self) -> None:
         """Finalize a run and flush backend state."""
         self._stop.set()
         self._flush_thread.join()
+        self._metrics.shutdown()
         self._upload_pool.shutdown(wait=True)
         self._flush_logs()
         self._flush_scalars()
@@ -168,6 +179,7 @@ class RemoteBackend:
     def _flush_loop(self) -> None:
         while not self._stop.wait(timeout=2.0):
             self._flush_logs()
+            self._sample_metrics()
             self._flush_scalars()
 
     def _flush_logs(self) -> None:
