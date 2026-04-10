@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import mimetypes
 import threading
 import urllib.request
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -20,18 +21,31 @@ from underfit.media import Media
 from underfit.media._helpers import extract_media_content
 
 
-def _multipart_body(metadata: dict[str, Any], files: list[bytes]) -> tuple[bytes, str]:
+def _multipart_body(metadata: dict[str, Any], files: list[tuple[bytes, str]]) -> tuple[bytes, str]:
     boundary = uuid4().hex
     buf = BytesIO()
     buf.write(f"--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\n".encode())
     buf.write(f"\r\n{json.dumps(metadata)}\r\n".encode())
-    for i, data in enumerate(files):
+    for i, (data, media_type) in enumerate(files):
         buf.write(f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{i}\"\r\n".encode())
-        buf.write(b"Content-Type: application/octet-stream\r\n\r\n")
+        buf.write(f"Content-Type: {media_type}\r\n\r\n".encode())
         buf.write(data)
         buf.write(b"\r\n")
     buf.write(f"--{boundary}--\r\n".encode())
     return buf.getvalue(), f"multipart/form-data; boundary={boundary}"
+
+
+def _media_content_type(payload: dict[str, Any]) -> str:
+    if (path := payload.get("path")) is not None and (media_type := mimetypes.guess_type(str(path))[0]) is not None:
+        return media_type
+    if payload.get("_type") == "html":
+        return "text/html"
+    file_type = payload.get("file_type")
+    guessed = mimetypes.guess_type(f"file.{file_type}")[0] if file_type is not None else None
+    if guessed is not None:
+        media_type = guessed
+        return media_type
+    return "application/octet-stream"
 
 
 class RemoteBackend:
@@ -115,7 +129,8 @@ class RemoteBackend:
         extra = {k: v for k, v in payloads[0].items() if k not in excluded and v is not None}
         if extra:
             meta["metadata"] = extra
-        data, content_type = _multipart_body(meta, [extract_media_content(payload) for payload in payloads])
+        files = [(extract_media_content(payload), _media_content_type(payload)) for payload in payloads]
+        data, content_type = _multipart_body(meta, files)
         req = urllib.request.Request(f"{self._api_url}/ingest/media", data=data, method="POST")
         req.add_header("Authorization", f"Bearer {self._worker_token}")
         req.add_header("Content-Type", content_type)

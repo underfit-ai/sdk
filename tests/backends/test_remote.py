@@ -6,6 +6,7 @@ import json
 from typing import Any
 from unittest.mock import patch
 
+from underfit import Html, Image
 from underfit.backends.remote import RemoteBackend
 
 API_URL = "https://api.example.com"
@@ -71,3 +72,21 @@ def test_log_lines_advances_start_line() -> None:
     assert reqs[0][2]["lines"][0]["content"] == "hello"
     assert reqs[0][2]["lines"][1]["content"] == "world"
     assert reqs[1][2]["startLine"] == 2
+
+
+def test_log_media_uses_specific_part_content_types() -> None:
+    """Send media parts with inferred content types instead of octet-stream."""
+    reqs: list[tuple[str, str, Any]] = []
+    backend = _create_backend(reqs)
+    bodies: list[bytes] = []
+
+    def handler(req: Any, **_: Any) -> _MockResponse:
+        bodies.append(req.data)
+        return _MockResponse({})
+
+    with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=handler):
+        backend.log_media("sample", 1, [Image(b"img", file_type="png")])
+        backend.log_media("sample", 1, [Html("<h1>ok</h1>")])
+
+    assert b"Content-Type: image/png" in bodies[0]
+    assert b"Content-Type: text/html" in bodies[1]
