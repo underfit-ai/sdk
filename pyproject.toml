@@ -13,6 +13,7 @@ license-files = ["LICENSE"]
 dependencies = []
 
 [project.optional-dependencies]
+view = ["underfit-api"]
 testing = [
     "ruff",
     "ty",
@@ -20,9 +21,15 @@ testing = [
     "pytest-mock",
 ]
 
+[project.scripts]
+underfit = "underfit.cli:main"
+
 [build-system]
 requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv.sources]
+underfit-api = { path = "../api" }
 
 [tool.setuptools.package-data]
 "underfit" = ["py.typed"]
