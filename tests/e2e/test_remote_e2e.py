@@ -16,7 +16,7 @@ def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
     auth = {"Authorization": f"Bearer {remote_env['api_key']}"}
 
     run = underfit.init(
-        project=f"{handle}/{project}", name="alpha", remote_url="http://testserver",
+        project=project, name="alpha", remote_url="http://testserver",
         config={"lr": 0.01}, worker_label="w0",
     )
     run.log({"loss": 0.5, "accuracy": 0.9}, step=1)
