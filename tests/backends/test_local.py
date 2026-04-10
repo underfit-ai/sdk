@@ -49,11 +49,5 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     assert json.loads((artifact_dir / "manifest.json").read_text()) == {"files": ["payload.json"], "references": []}
     assert (artifact_dir / "files" / "payload.json").read_bytes() == b"{}"
 
-    media_dirs = [p for p in (backend.run_dir / "media").iterdir() if p.is_dir()]
-    assert len(media_dirs) == 1
-    media_dir = media_dirs[0]
-    UUID(media_dir.name)
-    assert (media_dir / "0").read_text() == "<h1>ok</h1>"
-    media_meta = json.loads((media_dir / "media.json").read_text())
-    expected = {"key": "samples", "metadata": {"caption": "summary", "inject": True}, "step": 7, "type": "html"}
-    assert media_meta == expected
+    media_path = backend.run_dir / "media" / "html" / "samples_7_0.html"
+    assert media_path.read_text() == "<h1>ok</h1>"

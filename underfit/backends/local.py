@@ -82,14 +82,11 @@ class LocalBackend:
         if not media:
             return
         payloads = [m.to_payload() for m in media]
-        dest = self.run_dir / "media" / str(uuid4())
-        dest.mkdir(parents=True, exist_ok=True)
+        media_type = str(payloads[0].get("_type") or "unknown")
         for idx, payload in enumerate(payloads):
-            (dest / str(idx)).write_bytes(extract_media_content(payload))
-        excluded = {"_type", "path", "data", "html"}
-        metadata = {k: v for k, v in payloads[0].items() if k not in excluded and v is not None}
-        info = {"key": key, "step": step, "type": payloads[0].get("_type"), "metadata": metadata or None}
-        (dest / "media.json").write_text(json.dumps(info, indent=2, sort_keys=True), encoding="utf-8")
+            path = self.run_dir / "media" / media_type / f"{key}_{step}_{idx}{self._media_suffix(payload)}"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(extract_media_content(payload))
 
     def log_artifact(self, artifact: Artifact) -> Future[None]:
         """Store an artifact for a run."""
@@ -139,3 +136,13 @@ class LocalBackend:
 
     def _write_run_meta(self) -> None:
         (self.run_dir / "run.json").write_text(json.dumps(self._run_meta, indent=2, sort_keys=True), encoding="utf-8")
+
+    @staticmethod
+    def _media_suffix(payload: dict[str, Any]) -> str:
+        if (path := payload.get("path")) is not None and (suffix := Path(path).suffix):
+            return suffix
+        if (file_type := payload.get("file_type")) is not None:
+            return f".{str(file_type).lstrip('.')}"
+        if payload.get("_type") == "html":
+            return ".html"
+        return ".bin"
