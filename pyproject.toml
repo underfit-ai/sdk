@@ -19,6 +19,7 @@ testing = [
     "ty",
     "pytest",
     "pytest-mock",
+    "underfit-api",
 ]
 
 [project.scripts]

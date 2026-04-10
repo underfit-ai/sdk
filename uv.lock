@@ -1002,6 +1002,7 @@ testing = [
     { name = "pytest-mock" },
     { name = "ruff" },
     { name = "ty" },
+    { name = "underfit-api" },
 ]
 view = [
     { name = "underfit-api" },
@@ -1013,6 +1014,7 @@ requires-dist = [
     { name = "pytest-mock", marker = "extra == 'testing'" },
     { name = "ruff", marker = "extra == 'testing'" },
     { name = "ty", marker = "extra == 'testing'" },
+    { name = "underfit-api", marker = "extra == 'testing'", directory = "../api" },
     { name = "underfit-api", marker = "extra == 'view'", directory = "../api" },
 ]
 provides-extras = ["view", "testing"]

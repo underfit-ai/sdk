@@ -11,6 +11,7 @@ from underfit import Artifact, Html
 from underfit.backends.remote import RemoteBackend
 
 API_URL = "https://api.example.com"
+API_BASE = f"{API_URL}/api/v1"
 API_KEY = "test-api-key"
 
 
@@ -67,7 +68,7 @@ def test_launch_run() -> None:
     assert backend.run_name == "server-name"
     method, url, body = requests[0]
     assert method == "POST"
-    assert url == f"{API_URL}/accounts/owner/projects/proj/runs/launch"
+    assert url == f"{API_BASE}/accounts/owner/projects/proj/runs/launch"
     assert body == {"runName": "my-run", "launchId": "launch-1", "workerLabel": "gpu-0", "config": {"lr": 0.01}}
 
 
@@ -78,8 +79,8 @@ def test_launch_run_resolves_bare_project_name() -> None:
         {"handle": "owner"},
         {"id": "run-uuid", "name": "server-name", "workerToken": "wt-123"},
     ])
-    assert requests[0][0:2] == ("GET", f"{API_URL}/me")
-    assert requests[1][0:2] == ("POST", f"{API_URL}/accounts/owner/projects/proj/runs/launch")
+    assert requests[0][0:2] == ("GET", f"{API_BASE}/me")
+    assert requests[1][0:2] == ("POST", f"{API_BASE}/accounts/owner/projects/proj/runs/launch")
 
 
 def test_log_scalars() -> None:
@@ -126,7 +127,7 @@ def test_log_media() -> None:
         backend.log_media("samples", 1, [Html("<h1>ok</h1>", caption="hi")])
     method, url, data = reqs[0]
     assert method == "POST"
-    assert url == f"{API_URL}/ingest/media"
+    assert url == f"{API_BASE}/ingest/media"
     assert b"<h1>ok</h1>" in data
 
 
@@ -143,7 +144,7 @@ def test_log_artifact(tmp_path: Path) -> None:
         backend.log_artifact(artifact).result()
         backend._upload_pool.shutdown(wait=True)  # noqa: SLF001
     assert reqs[0][0] == "POST"
-    assert reqs[0][1] == f"{API_URL}/accounts/owner/projects/proj/runs/server-name/artifacts"
+    assert reqs[0][1] == f"{API_BASE}/accounts/owner/projects/proj/runs/server-name/artifacts"
     assert reqs[0][2] == {"name": "ds", "type": "dataset"}
     assert reqs[1][0] == "PUT" and reqs[1][1].endswith("/artifacts/art-uuid/files/data.json")
     assert reqs[2][0] == "POST" and reqs[2][2] == {"manifest": {"files": ["data.json"], "references": []}}
@@ -157,5 +158,5 @@ def test_finish_sets_terminal_state() -> None:
     with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, [{}])):
         backend.finish()
     assert len(reqs) == 1
-    assert reqs[0][1] == f"{API_URL}/runs/terminal-state"
+    assert reqs[0][1] == f"{API_BASE}/runs/terminal-state"
     assert reqs[0][2] == {"terminalState": "finished"}

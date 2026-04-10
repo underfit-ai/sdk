@@ -60,7 +60,7 @@ class RemoteBackend:
             run_config: Run configuration payload.
             worker_label: Label identifying this worker.
         """
-        self._api_url = api_url.rstrip("/")
+        self._api_url = api_url.rstrip("/") + "/api/v1"
         self._api_key = api_key
         if "/" not in project:
             user = self._request("GET", f"{self._api_url}/me", auth="api_key")
