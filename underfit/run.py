@@ -105,10 +105,11 @@ class Run:
             elif isinstance(value, (Html, Image, Video, Audio)):
                 media_batches.append((key, [value]))
             elif isinstance(value, (list, tuple)):
-                if value and all(isinstance(v, (Html, Image, Video, Audio)) for v in value):
-                    media_batches.append((key, list(value)))
-                else:
+                if not value or not all(isinstance(v, (Html, Image, Video, Audio)) for v in value):
                     raise TypeError(f"Lists passed to underfit.Run.log must contain only media objects: {key}")
+                if any(type(v) is not type(value[0]) for v in value[1:]):
+                    raise TypeError(f"Lists passed to underfit.Run.log must contain only one media type: {key}")
+                media_batches.append((key, list(value)))
             else:
                 raise TypeError(f"Unsupported value for underfit.Run.log: {key}")
 

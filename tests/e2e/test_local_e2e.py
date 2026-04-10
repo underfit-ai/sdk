@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import time
 from typing import Any
+from zipfile import ZipFile
 
 import underfit
 from tests.e2e.conftest import boot_backfill_client
@@ -32,10 +34,10 @@ def test_local_backend_round_trip(local_env: dict[str, Any]) -> None:
         project="vision", name="alpha", log_dir=log_dir,
         config={"lr": 0.01}, worker_label="w0",
     )
-    run.log({"loss": 0.5}, step=1)
-    run.log({"loss": 0.4}, step=2)
+    underfit.log({"loss": 0.5}, step=1)
+    underfit.log({"loss": 0.4}, step=2)
     run.backend.log_lines(["hello", "world"])
-    run.log({"sample": Html("<h1>ok</h1>", caption="hi")}, step=1)
+    underfit.log({"sample": Html("<h1>ok</h1>", caption="hi")}, step=1)
 
     artifact = Artifact("ds", "dataset", metadata={"format": "json"})
     artifact.add_bytes(b'{"x": 1}', name="data.json")
@@ -81,3 +83,27 @@ def test_local_backend_round_trip(local_env: dict[str, Any]) -> None:
         file_resp = client.get(f"/api/v1/artifacts/{artifact_id}/files/data.json")
         assert file_resp.status_code == 200
         assert file_resp.content == b'{"x": 1}'
+
+
+def test_log_code_round_trip(local_env: dict[str, Any]) -> None:
+    """Upload source code through the SDK and fetch the archive through the API."""
+    log_dir = local_env["log_dir"]
+    api_tmp_path = local_env["api_tmp_path"]
+    root = api_tmp_path / "src"
+    root.mkdir()
+    (root / "train.py").write_text("print('ok')\n")
+    (root / "notes.txt").write_text("ignore\n")
+
+    underfit.init(project="vision", name="alpha", log_dir=log_dir, worker_label="w0")
+    underfit.log_code(root).result()
+    underfit.finish()
+
+    with boot_backfill_client(api_tmp_path, log_dir) as client:
+        artifacts = _wait_for(client, "/api/v1/accounts/local/projects/vision/artifacts", predicate=bool)
+        assert len(artifacts) == 1
+        assert artifacts[0]["name"] == "source-code"
+        assert artifacts[0]["type"] == "code"
+        archive = client.get(f"/api/v1/artifacts/{artifacts[0]['id']}/files/source-code.zip")
+        assert archive.status_code == 200
+        with ZipFile(io.BytesIO(archive.content)) as zip_file:
+            assert zip_file.namelist() == ["train.py"]

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import underfit
-from underfit import Artifact, Html
+from underfit import Html
 
 
 def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
@@ -19,14 +19,11 @@ def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
         project=project, name="alpha", remote_url="http://testserver",
         config={"lr": 0.01}, worker_label="w0",
     )
-    run.log({"loss": 0.5, "accuracy": 0.9}, step=1)
-    run.log({"loss": 0.4, "accuracy": 0.92}, step=2)
+    underfit.log({"loss": 0.5, "accuracy": 0.9}, step=1)
+    underfit.log({"loss": 0.4, "accuracy": 0.92}, step=2)
     run.backend.log_lines(["hello", "world"])
-    run.log({"sample": Html("<h1>ok</h1>", caption="hi")}, step=1)
-
-    artifact = Artifact("ds", "dataset", metadata={"format": "json"})
-    artifact.add_bytes(b'{"x": 1}', name="data.json")
-    run.log_artifact(artifact).result()
+    underfit.log({"sample": Html("<h1>ok</h1>", caption="hi")}, step=1)
+    underfit.log_model(b'{"x": 1}', name="ds").result()
 
     underfit.finish()
 
@@ -67,10 +64,10 @@ def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
     artifacts = artifacts_resp.json()
     assert len(artifacts) == 1
     assert artifacts[0]["name"] == "ds"
-    assert artifacts[0]["type"] == "dataset"
+    assert artifacts[0]["type"] == "model"
     assert artifacts[0]["finalizedAt"] is not None
 
     artifact_id = artifacts[0]["id"]
-    file_resp = client.get(f"/api/v1/artifacts/{artifact_id}/files/data.json", headers=auth)
+    file_resp = client.get(f"/api/v1/artifacts/{artifact_id}/files/checkpoint.bin", headers=auth)
     assert file_resp.status_code == 200
     assert file_resp.content == b'{"x": 1}'

@@ -50,3 +50,10 @@ def test_init_supports_context_manager(
     assert underfit.run is None
     spy.assert_called_once()
     assert spy.call_args.args[1] == state
+
+
+def test_init_remote_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Require an API key before creating a remote run."""
+    monkeypatch.delenv("UNDERFIT_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="UNDERFIT_API_KEY"):
+        underfit.init("project", remote_url="https://example.com")

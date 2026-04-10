@@ -14,7 +14,7 @@ import pytest
 
 from underfit.artifact import Artifact, ArtifactDataUpload
 from underfit.backends import Backend
-from underfit.media import Html, Media
+from underfit.media import Html, Image, Media
 from underfit.run import Run
 
 artifact_module = importlib.import_module("underfit.artifact")
@@ -88,6 +88,13 @@ def test_log_rejects_unsupported_values() -> None:
 
     assert backend.scalar_calls == []
     assert backend.media_calls == []
+
+
+def test_log_rejects_mixed_media_lists() -> None:
+    """Reject media batches with inconsistent types."""
+    run = Run("project", "run", _RecordingBackend())
+    with pytest.raises(TypeError, match="only one media type: samples"):
+        run.log({"samples": [Html("<p>a</p>"), Image(b"img", file_type="png")]})
 
 
 def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
