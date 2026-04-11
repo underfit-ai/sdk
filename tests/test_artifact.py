@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import os
+import subprocess
 import urllib.error
 from email.message import Message
 from pathlib import Path
@@ -17,7 +18,7 @@ from underfit.artifact import (
     ArtifactPathUpload,
     ArtifactReference,
 )
-from underfit.media import Html
+from underfit.media import Audio, Html, Image, Video
 
 
 def test_artifact_collects_uploads_and_manifest(tmp_path: Path) -> None:
@@ -56,7 +57,7 @@ def test_artifact_collects_uploads_and_manifest(tmp_path: Path) -> None:
     )
 
 
-def test_artifact_add_media_uses_uploadable_file_content() -> None:
+def test_artifact_add_media_uses_uploadable_file_content(tmp_path: Path) -> None:
     """Convert media payloads into artifact file uploads."""
     artifact = Artifact("report", "report")
 
@@ -67,6 +68,16 @@ def test_artifact_add_media_uses_uploadable_file_content() -> None:
         ArtifactDataUpload(path="media-1.html", data=base64.b64encode(b"<h1>ok</h1>").decode("ascii")),
     ]
     assert artifact.manifest() == ArtifactManifest(files=["media-1.html"], references=[])
+    image_path = tmp_path / "sample.png"
+    html_path = tmp_path / "sample.html"
+    image_path.write_bytes(b"img")
+    html_path.write_text("<h1>ok</h1>")
+    assert Image(image_path).to_payload()["file_type"] == "png"
+    assert Html(html_path).to_payload()["path"] == str(html_path)
+    assert Audio(b"audio", file_type="wav").to_payload()["file_type"] == "wav"
+    assert Video(b"video", file_type="mp4").to_payload()["file_type"] == "mp4"
+    with pytest.raises(ValueError, match="file_type is required"):
+        Audio(b"audio")
 
 
 def test_artifact_rejects_invalid_and_conflicting_paths() -> None:
@@ -140,3 +151,28 @@ def test_artifact_add_url_leaves_missing_headers_blank(monkeypatch: pytest.Monke
     artifact.add_url("https://example.com/model")
 
     assert artifact.manifest().references == [ArtifactReference(url="https://example.com/model")]
+
+
+def test_artifact_from_model_directory_and_git_repo(tmp_path: Path) -> None:
+    """Build artifacts from a directory checkpoint and a real git repo."""
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "weights.bin").write_bytes(b"weights")
+    assert Artifact.from_model(checkpoint, step=7).uploads() == [
+        ArtifactPathUpload(path="checkpoint/weights.bin", source_path=str(checkpoint / "weights.bin")),
+    ]
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)  # noqa: S607
+    (repo / "tracked.txt").write_text("v1\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True, capture_output=True)  # noqa: S607
+    (repo / "tracked.txt").write_text("v1\nv2\n")
+    (repo / "new.txt").write_text("new\n")
+
+    artifact = Artifact.from_git(repo)
+    upload = artifact.uploads()[0]
+    assert artifact.metadata["commit"] is None and artifact.metadata["is_dirty"] is True
+    assert artifact.metadata["untracked_files"] == ["new.txt"]
+    assert isinstance(upload, ArtifactDataUpload) and upload.path == "working-tree.patch"
+    assert b"tracked.txt" in base64.b64decode(upload.data)

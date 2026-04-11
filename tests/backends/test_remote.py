@@ -90,3 +90,22 @@ def test_log_media_uses_specific_part_content_types() -> None:
 
     assert b"Content-Type: image/png" in bodies[0]
     assert b"Content-Type: text/html" in bodies[1]
+
+
+def test_finish_flushes_scalar_buffer_and_updates_terminal_state() -> None:
+    """Flush queued scalars before reporting terminal state."""
+    reqs: list[tuple[str, str, Any]] = []
+    backend = _create_backend(reqs)
+    reqs.clear()
+
+    with patch(
+        "underfit.backends.remote.urllib.request.urlopen",
+        side_effect=_mock_urlopen(reqs, [{"nextStartLine": 1}, {}]),
+    ):
+        backend.log_scalars({"loss": 0.5}, step=3)
+        backend.finish("failed")
+
+    assert reqs[0][2]["startLine"] == 0
+    assert reqs[0][2]["scalars"][0]["step"] == 3
+    assert reqs[0][2]["scalars"][0]["values"] == {"loss": 0.5}
+    assert reqs[1] == ("PUT", f"{API_URL}/api/v1/runs/terminal-state", {"terminalState": "failed"})
