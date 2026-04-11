@@ -46,3 +46,6 @@ lint.ignore = [
     "ANN401", "COM812", "E701", "FIX002", "N802", "PT018", "S101", "S310",  # NOTE: ruff's S310 seems broken right now
 ]
 lint.pydocstyle.convention = "google"
+
+[tool.pytest.ini_options]
+addopts = "--disable-plugin-autoload"
