@@ -6,7 +6,7 @@ from typing import Any
 
 _has_psutil = False
 try:
-    import psutil  # ty: ignore[unresolved-import]  # noqa: PLC0415
+    import psutil  # noqa: PLC0415
     _has_psutil = True
 except ImportError:
     pass

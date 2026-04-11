@@ -57,3 +57,13 @@ def test_init_remote_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("UNDERFIT_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="UNDERFIT_API_KEY"):
         underfit.init("project", remote_url="https://example.com")
+
+
+def test_init_uses_env_log_dir_and_reuses_active_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Honor UNDERFIT_LOG_DIR and return the existing run on repeated init calls."""
+    monkeypatch.setenv("UNDERFIT_LOG_DIR", str(tmp_path))
+    run = underfit.init("project", worker_label="worker-0")
+    assert isinstance(run.backend, LocalBackend)
+    assert run.backend.run_dir.parent == tmp_path.resolve()
+    assert underfit.init("other-project", worker_label="worker-1") is run
+    underfit.finish()
