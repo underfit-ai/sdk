@@ -45,9 +45,10 @@ class Html:
         data: bytes
         mime_type = "text/html"
 
-        if isinstance(data_or_path, Path):
-            mime_type = validate_path(data_or_path, r"text/html|application/xhtml\+xml", "an HTML")
-            data = data_or_path.read_bytes()
+        if isinstance(data_or_path, (str, Path)) and Path(data_or_path).exists():
+            path = Path(data_or_path)
+            mime_type = validate_path(path, r"text/html|application/xhtml\+xml", "an HTML")
+            data = path.read_bytes()
             self._validate_utf8(data, "HTML files must be UTF-8 encoded")
         elif isinstance(data_or_path, str):
             data = data_or_path.encode("utf-8")

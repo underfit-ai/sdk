@@ -48,6 +48,7 @@ class LocalBackend:
         self._run_meta = {"project": project_name, "name": self.run_name, "config": run_config}
         self._write_run_meta()
         self._metrics = SystemMetrics()
+        self._scalar_lock = threading.Lock()
         self._stop = threading.Event()
         if self._metrics.available:
             self._metrics_thread = threading.Thread(target=self._metrics_loop, daemon=True)
@@ -60,9 +61,8 @@ class LocalBackend:
         path = self.run_dir / "scalars" / self._worker_label / f"r{self._RAW_SCALAR_RESOLUTION}" / "0.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"step": step, "values": values, "timestamp": ts}, sort_keys=True))
-            f.write("\n")
+        with self._scalar_lock, path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"step": step, "values": values, "timestamp": ts}, sort_keys=True) + "\n")
 
     def log_lines(self, lines: list[str]) -> None:
         """Append console log lines for the run's worker."""

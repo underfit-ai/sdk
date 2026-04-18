@@ -72,11 +72,6 @@ class RemoteBackend:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._metrics = SystemMetrics()
-        self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
-        self._flush_thread.start()
-        if self._metrics.available:
-            self._metrics_thread = threading.Thread(target=self._metrics_loop, daemon=True)
-            self._metrics_thread.start()
         self._upload_pool = ThreadPoolExecutor(max_workers=4)
 
         body: dict[str, Any] = {"runName": run_name, "launchId": launch_id, "workerLabel": worker_label}
@@ -85,6 +80,11 @@ class RemoteBackend:
         resp = self._request("POST", f"{self._runs_url}/launch", body, auth="api_key")
         self.run_name = resp["name"]
         self._worker_token = resp["workerToken"]
+        self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
+        self._flush_thread.start()
+        if self._metrics.available:
+            self._metrics_thread = threading.Thread(target=self._metrics_loop, daemon=True)
+            self._metrics_thread.start()
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
         """Append scalar metric values for a run."""
