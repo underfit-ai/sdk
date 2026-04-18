@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import base64
 import json
-import mimetypes
 import threading
 import urllib.request
+from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -18,7 +17,6 @@ from uuid import uuid4
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.lib.metrics import SystemMetrics
 from underfit.media import Media
-from underfit.media._helpers import extract_media_content
 
 
 def _multipart_body(metadata: dict[str, Any], files: list[tuple[bytes, str]]) -> tuple[bytes, str]:
@@ -33,20 +31,6 @@ def _multipart_body(metadata: dict[str, Any], files: list[tuple[bytes, str]]) ->
         buf.write(b"\r\n")
     buf.write(f"--{boundary}--\r\n".encode())
     return buf.getvalue(), f"multipart/form-data; boundary={boundary}"
-
-
-def _media_content_type(payload: dict[str, Any]) -> str:
-    if (path := payload.get("path")) is not None and (media_type := mimetypes.guess_type(str(path))[0]) is not None:
-        return media_type
-    if payload.get("_type") == "html":
-        return "text/html"
-    file_type = payload.get("file_type")
-    guessed = mimetypes.guess_type(f"file.{file_type}")[0] if file_type is not None else None
-    if guessed is not None:
-        media_type = guessed
-        return media_type
-    return "application/octet-stream"
-
 
 class RemoteBackend:
     """Push run data to a remote Underfit API server."""
@@ -119,17 +103,17 @@ class RemoteBackend:
             for line in lines:
                 self._log_buffer.append({"timestamp": ts, "content": line.rstrip("\n")})
 
-    def log_media(self, key: str, step: int | None, media: list[Media]) -> None:
+    def log_media(self, key: str, step: int | None, media: Sequence[Media]) -> None:
         """Append media files for a run under a shared key and step."""
         if not media:
             return
-        payloads = [m.to_payload() for m in media]
-        meta: dict[str, Any] = {"key": key, "step": step, "type": payloads[0].get("_type")}
-        excluded = {"_type", "path", "data", "html"}
-        extra = {k: v for k, v in payloads[0].items() if k not in excluded and v is not None}
+        payload_data = asdict(media[0])
+        meta: dict[str, Any] = {"key": key, "step": step, "type": payload_data["_type"]}
+        excluded = {"_type", "data", "mime_type"}
+        extra = {k: v for k, v in payload_data.items() if k not in excluded and v is not None}
         if extra:
             meta["metadata"] = extra
-        files = [(extract_media_content(payload), _media_content_type(payload)) for payload in payloads]
+        files = [(payload.data, payload.mime_type) for payload in media]
         data, content_type = _multipart_body(meta, files)
         req = urllib.request.Request(f"{self._api_url}/ingest/media", data=data, method="POST")
         req.add_header("Authorization", f"Bearer {self._worker_token}")
@@ -198,7 +182,7 @@ class RemoteBackend:
             if isinstance(upload, ArtifactPathUpload):
                 file_data = Path(upload.source_path).read_bytes()
             elif isinstance(upload, ArtifactDataUpload):
-                file_data = base64.b64decode(upload.data)
+                file_data = upload.data
             else:
                 raise RuntimeError("Artifact upload is missing file content")
             url = f"{self._api_url}/artifacts/{created['id']}/files/{upload.path}"

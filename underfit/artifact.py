@@ -19,7 +19,7 @@ from typing import Any, Callable, Union
 from urllib.parse import unquote, urlparse
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
-from underfit.media import Media
+from underfit.media import Audio, Html, Image, Media, Video
 
 PathLike = Union[str, Path]
 BytesLike = Union[bytes, bytearray, memoryview]
@@ -39,7 +39,7 @@ class ArtifactPathUpload:
 class ArtifactDataUpload:
     """Represent a queued file upload sourced from in-memory data."""
     path: str
-    data: str
+    data: bytes
 
 
 @dataclass(frozen=True)
@@ -268,15 +268,14 @@ class Artifact:
             TypeError: If ``obj`` is not a supported media object.
             ValueError: If the file path is invalid.
         """
-        if not isinstance(obj, Media):
+        if not isinstance(obj, (Audio, Html, Image, Video)):
             raise TypeError("obj must be an underfit media object implementing the Media protocol")
 
-        payload = obj.to_payload()
-        default_name = self._default_media_name(payload)
+        default_name = self._default_media_name(obj)
         artifact_path = self._resolve_artifact_path(default_name, name)
         if name is None:
             self._next_media_index += 1
-        self._upload_files.append(self._build_media_upload(payload, artifact_path))
+        self._upload_files.append(self._build_media_upload(obj, artifact_path))
         return artifact_path
 
     def add_bytes(self, data: BytesLike, *, name: str | None = None) -> str:
@@ -297,8 +296,7 @@ class Artifact:
             raise TypeError("data must be bytes-like")
 
         artifact_path = self._resolve_artifact_path("checkpoint.bin", name)
-        encoded = base64.b64encode(bytes(data)).decode("ascii")
-        self._upload_files.append(ArtifactDataUpload(path=artifact_path, data=encoded))
+        self._upload_files.append(ArtifactDataUpload(path=artifact_path, data=bytes(data)))
         return artifact_path
 
     def add_url(self, url: str) -> None:
@@ -362,24 +360,18 @@ class Artifact:
                 raise ValueError(f"entry path already exists: {artifact_path}")
         self._used_paths.add(artifact_path)
 
-    def _build_media_upload(self, payload: dict[str, Any], artifact_path: str) -> ArtifactUpload:
-        if "path" in payload and payload["path"] is not None:
-            path = self._coerce_existing_path(payload["path"])
-            if not path.is_file():
-                raise ValueError(f"media path must point to a file: {path}")
-            return ArtifactPathUpload(path=artifact_path, source_path=str(path))
-        if "data" in payload and payload["data"] is not None:
-            return ArtifactDataUpload(path=artifact_path, data=payload["data"])
-        if "html" in payload and payload["html"] is not None:
-            encoded = base64.b64encode(str(payload["html"]).encode("utf-8")).decode("ascii")
-            return ArtifactDataUpload(path=artifact_path, data=encoded)
-        raise ValueError("media payload is missing content")
+    def _build_media_upload(self, payload: Media, artifact_path: str) -> ArtifactUpload:
+        if isinstance(payload, (Audio, Image, Video)):
+            return ArtifactDataUpload(path=artifact_path, data=payload.data)
+        if isinstance(payload, Html):
+            return ArtifactDataUpload(path=artifact_path, data=payload.data)
+        raise TypeError("payload must be an underfit media payload")
 
-    def _default_media_name(self, payload: dict[str, Any]) -> str:
+    def _default_media_name(self, payload: Media) -> str:
         suffix = ""
-        if payload.get("_type") == "html":
+        if isinstance(payload, Html):
             suffix = ".html"
-        elif file_type := payload.get("file_type"):
+        elif file_type := getattr(payload, "file_type", None):
             suffix = f".{file_type}"
         return f"media-{self._next_media_index}{suffix}"
 

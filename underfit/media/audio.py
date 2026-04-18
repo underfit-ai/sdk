@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import base64
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Union
+from typing import Literal, Union
 
-from underfit.media._helpers import infer_media_file_type, validate_media_path
+from underfit.media._helpers import guess_mime_type, validate_path
 
 PathLikeOrBytes = Union[str, Path, bytes, bytearray, memoryview]
 
 
+@dataclass(frozen=True, init=False)
 class Audio:
     """Represent an audio payload for logging.
 
@@ -19,11 +20,12 @@ class Audio:
     for SDK consumers.
     """
 
-    path: Path | None
-    data: bytes | None
+    _type: Literal["audio"] = field(init=False, default="audio")
+    data: bytes
     caption: str | None
     sample_rate: int | None
     file_type: str | None
+    mime_type: str
 
     def __init__(
         self,
@@ -48,39 +50,24 @@ class Audio:
         if sample_rate is not None and (not isinstance(sample_rate, int) or sample_rate <= 0):
             raise ValueError("sample_rate must be a positive integer")
 
-        path: Path | None = None
-        data: bytes | None = None
+        inferred_file_type = file_type
+        mime_type = "application/octet-stream"
 
         if isinstance(data_or_path, (str, Path)):
             path = Path(data_or_path)
-            validate_media_path(path, "audio", "an audio")
+            mime_type = validate_path(path, r"audio/.+", "an audio")
+            data = path.read_bytes()
+            inferred_file_type = file_type or mime_type.split("/")[-1]
         elif isinstance(data_or_path, (bytes, bytearray, memoryview)):
             data = bytes(data_or_path)
             if file_type is None:
                 raise ValueError("file_type is required when providing raw bytes")
+            mime_type = guess_mime_type(file_type) or "application/octet-stream"
         else:
             raise TypeError("data_or_path must be a path string, Path, or bytes-like object")
 
-        inferred_file_type = file_type or (infer_media_file_type(path, "audio") if path else None)
-
-        self.path = path
-        self.data = data
-        self.caption = caption
-        self.sample_rate = sample_rate
-        self.file_type = inferred_file_type
-
-    def to_payload(self) -> dict[str, Any]:
-        """Return a transport-ready dictionary for this audio payload."""
-        payload: dict[str, Any] = {
-            "_type": "audio",
-            "caption": self.caption,
-            "sample_rate": self.sample_rate,
-            "file_type": self.file_type,
-        }
-
-        if self.path is not None:
-            payload["path"] = str(self.path)
-        elif self.data is not None:
-            payload["data"] = base64.b64encode(self.data).decode("ascii")
-
-        return {key: value for key, value in payload.items() if value is not None}
+        object.__setattr__(self, "data", data)
+        object.__setattr__(self, "caption", caption)
+        object.__setattr__(self, "sample_rate", sample_rate)
+        object.__setattr__(self, "file_type", inferred_file_type)
+        object.__setattr__(self, "mime_type", mime_type)

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-import mimetypes
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Union
+from typing import Literal, Union
+
+from underfit.media._helpers import validate_path
 
 HtmlLike = Union[str, Path, bytes, bytearray, memoryview]
 
 
+@dataclass(frozen=True, init=False)
 class Html:
     """Represent an HTML payload for logging.
 
@@ -21,10 +24,11 @@ class Html:
         >>> Html("<h1>Report</h1>", caption="summary")
     """
 
-    path: Path | None
-    html: str | None
+    _type: Literal["html"] = field(init=False, default="html")
+    data: bytes
     caption: str | None
     inject: bool
+    mime_type: str
 
     def __init__(self, data_or_path: HtmlLike, *, caption: str | None = None, inject: bool = True) -> None:
         """Initialize an HTML payload.
@@ -38,48 +42,29 @@ class Html:
             TypeError: If ``data_or_path`` is not a supported input type.
             ValueError: If ``data_or_path`` bytes cannot be decoded as UTF-8.
         """
-        path: Path | None = None
-        html: str | None = None
+        data: bytes
+        mime_type = "text/html"
 
         if isinstance(data_or_path, Path):
-            path = data_or_path
-            self._validate_path(path)
+            mime_type = validate_path(data_or_path, r"text/html|application/xhtml\+xml", "an HTML")
+            data = data_or_path.read_bytes()
+            self._validate_utf8(data, "HTML files must be UTF-8 encoded")
         elif isinstance(data_or_path, str):
-            html = data_or_path
+            data = data_or_path.encode("utf-8")
         elif isinstance(data_or_path, (bytes, bytearray, memoryview)):
-            try:
-                html = bytes(data_or_path).decode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise ValueError("HTML bytes must be UTF-8 encoded") from exc
+            data = bytes(data_or_path)
+            self._validate_utf8(data, "HTML bytes must be UTF-8 encoded")
         else:
             raise TypeError("data_or_path must be an HTML string, Path, or bytes-like object")
 
-        self.path = path
-        self.html = html
-        self.caption = caption
-        self.inject = inject
-
-    def to_payload(self) -> dict[str, Any]:
-        """Return a transport-ready dictionary for this HTML payload.
-
-        Returns:
-            Dictionary with stable keys used by future uploader integrations.
-        """
-        payload: dict[str, Any] = {"_type": "html", "caption": self.caption, "inject": self.inject}
-
-        if self.path is not None:
-            payload["path"] = str(self.path)
-        elif self.html is not None:
-            payload["html"] = self.html
-
-        return {key: value for key, value in payload.items() if value is not None}
+        object.__setattr__(self, "data", data)
+        object.__setattr__(self, "caption", caption)
+        object.__setattr__(self, "inject", inject)
+        object.__setattr__(self, "mime_type", mime_type)
 
     @staticmethod
-    def _validate_path(path: Path) -> None:
-        if not path.exists():
-            raise FileNotFoundError(f"path does not exist: {path}")
-        if not path.is_file():
-            raise ValueError(f"path must point to a file: {path}")
-        mime, _ = mimetypes.guess_type(path.as_posix())
-        if mime is None or mime not in {"text/html", "application/xhtml+xml"}:
-            raise ValueError(f"path must be an HTML file: {path}")
+    def _validate_utf8(data: bytes, message: str) -> None:
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(message) from exc

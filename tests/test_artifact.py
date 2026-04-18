@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import os
 import subprocess
 import urllib.error
@@ -44,7 +43,7 @@ def test_artifact_collects_uploads_and_manifest(tmp_path: Path) -> None:
         ArtifactPathUpload(path="reports/metrics.json", source_path=str(metrics)),
         ArtifactPathUpload(path="files/a.txt", source_path=str(bundle / "a.txt")),
         ArtifactPathUpload(path="files/nested/b.txt", source_path=str(bundle / "nested" / "b.txt")),
-        ArtifactDataUpload(path="weights.bin", data=base64.b64encode(b"weights").decode("ascii")),
+        ArtifactDataUpload(path="weights.bin", data=b"weights"),
     ]
     assert artifact.manifest() == ArtifactManifest(
         files=["reports/metrics.json", "files/a.txt", "files/nested/b.txt", "weights.bin"],
@@ -65,17 +64,17 @@ def test_artifact_add_media_uses_uploadable_file_content(tmp_path: Path) -> None
 
     assert path == "media-1.html"
     assert artifact.uploads() == [
-        ArtifactDataUpload(path="media-1.html", data=base64.b64encode(b"<h1>ok</h1>").decode("ascii")),
+        ArtifactDataUpload(path="media-1.html", data=b"<h1>ok</h1>"),
     ]
     assert artifact.manifest() == ArtifactManifest(files=["media-1.html"], references=[])
     image_path = tmp_path / "sample.png"
     html_path = tmp_path / "sample.html"
     image_path.write_bytes(b"img")
     html_path.write_text("<h1>ok</h1>")
-    assert Image(image_path).to_payload()["file_type"] == "png"
-    assert Html(html_path).to_payload()["path"] == str(html_path)
-    assert Audio(b"audio", file_type="wav").to_payload()["file_type"] == "wav"
-    assert Video(b"video", file_type="mp4").to_payload()["file_type"] == "mp4"
+    assert Image(image_path) == Image(b"img", file_type="png")
+    assert Html(html_path) == Html("<h1>ok</h1>")
+    assert Audio(b"audio", file_type="wav") == Audio(b"audio", file_type="wav")
+    assert Video(b"video", file_type="mp4") == Video(b"video", file_type="mp4")
     with pytest.raises(ValueError, match="file_type is required"):
         Audio(b"audio")
 
@@ -175,4 +174,4 @@ def test_artifact_from_model_directory_and_git_repo(tmp_path: Path) -> None:
     assert artifact.metadata["commit"] is None and artifact.metadata["is_dirty"] is True
     assert artifact.metadata["untracked_files"] == ["new.txt"]
     assert isinstance(upload, ArtifactDataUpload) and upload.path == "working-tree.patch"
-    assert b"tracked.txt" in base64.b64decode(upload.data)
+    assert b"tracked.txt" in upload.data

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import shutil
 import threading
+from collections.abc import Sequence
 from concurrent.futures import Future
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -15,8 +15,7 @@ from uuid import uuid4
 
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.lib.metrics import SystemMetrics
-from underfit.media import Media
-from underfit.media._helpers import extract_media_content
+from underfit.media import Html, Media
 
 
 class LocalBackend:
@@ -77,16 +76,15 @@ class LocalBackend:
                 if not line.endswith("\n"):
                     f.write("\n")
 
-    def log_media(self, key: str, step: int | None, media: list[Media]) -> None:
+    def log_media(self, key: str, step: int | None, media: Sequence[Media]) -> None:
         """Append media files for a run under a shared key and step."""
         if not media:
             return
-        payloads = [m.to_payload() for m in media]
-        media_type = str(payloads[0].get("_type") or "unknown")
-        for idx, payload in enumerate(payloads):
+        media_type = str(asdict(media[0]).get("_type") or "unknown")
+        for idx, payload in enumerate(media):
             path = self.run_dir / "media" / media_type / f"{key}_{step}_{idx}{self._media_suffix(payload)}"
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(extract_media_content(payload))
+            path.write_bytes(payload.data)
 
     def log_artifact(self, artifact: Artifact) -> Future[None]:
         """Store an artifact for a run."""
@@ -105,7 +103,7 @@ class LocalBackend:
                     raise FileNotFoundError(f"artifact source file does not exist: {source}")
                 shutil.copy2(source, destination)
             elif isinstance(upload, ArtifactDataUpload):
-                destination.write_bytes(base64.b64decode(upload.data))
+                destination.write_bytes(upload.data)
             else:
                 raise RuntimeError("Artifact upload is missing file content")
 
@@ -138,11 +136,9 @@ class LocalBackend:
         (self.run_dir / "run.json").write_text(json.dumps(self._run_meta, indent=2, sort_keys=True), encoding="utf-8")
 
     @staticmethod
-    def _media_suffix(payload: dict[str, Any]) -> str:
-        if (path := payload.get("path")) is not None and (suffix := Path(path).suffix):
-            return suffix
-        if (file_type := payload.get("file_type")) is not None:
+    def _media_suffix(payload: Media) -> str:
+        if (file_type := getattr(payload, "file_type", None)) is not None:
             return f".{str(file_type).lstrip('.')}"
-        if payload.get("_type") == "html":
+        if isinstance(payload, Html):
             return ".html"
         return ".bin"

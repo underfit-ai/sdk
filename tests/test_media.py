@@ -2,36 +2,25 @@
 
 from __future__ import annotations
 
-import base64
-from collections.abc import Callable
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
 from underfit.media import Audio, Html, Image, Video
 
 
-def test_media_payloads_include_expected_fields(tmp_path: Path) -> None:
-    """Build stable payloads from valid media inputs."""
-    html_path = tmp_path / "report.html"
-    html_path.write_text("<h1>ok</h1>")
-    audio_path = tmp_path / "sample.wav"
-    audio_path.write_bytes(b"audio")
-    video_path = tmp_path / "sample.mp4"
-    video_path.write_bytes(b"video")
-
-    assert Html(html_path, caption="report").to_payload() == {
-        "_type": "html", "caption": "report", "inject": True, "path": str(html_path),
-    }
-    assert Image(b"img", file_type="png", width=2, height=1).to_payload() == {
-        "_type": "image", "file_type": "png", "width": 2, "height": 1, "data": base64.b64encode(b"img").decode("ascii"),
-    }
-    assert Audio(audio_path, sample_rate=16000).to_payload() == {
-        "_type": "audio", "sample_rate": 16000, "file_type": "wav", "path": str(audio_path),
-    }
-    assert Video(video_path, fps=12).to_payload() == {
-        "_type": "video", "fps": 12, "file_type": "mp4", "path": str(video_path),
-    }
+@pytest.mark.parametrize(("cls", "name", "data"), [
+    (Audio, "sample.wav", b"audio"),
+    (Image, "sample.png", b"img"),
+    (Video, "sample.mp4", b"video"),
+    (Html, "report.html", b"<h1>ok</h1>"),
+])
+def test_media_path_inputs_embed_data(tmp_path: Path, cls: type[object], name: str, data: bytes) -> None:
+    """Embed file contents for supported path-based media inputs."""
+    path = tmp_path / name
+    path.write_bytes(data)
+    assert cls(path).data == data
 
 
 @pytest.mark.parametrize(("factory", "message"), [

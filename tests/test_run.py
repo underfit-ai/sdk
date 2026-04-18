@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import base64
 import importlib
 import subprocess
+from collections.abc import Sequence
 from concurrent.futures import Future
 from io import BytesIO
 from pathlib import Path
@@ -23,7 +23,7 @@ artifact_module = importlib.import_module("underfit.artifact")
 class _RecordingBackend(Backend):
     def __init__(self) -> None:
         self.scalar_calls: list[tuple[dict[str, float], int | None]] = []
-        self.media_calls: list[tuple[str, int | None, list[Media]]] = []
+        self.media_calls: list[tuple[str, int | None, Sequence[Media]]] = []
         self.artifact_calls: list[Artifact] = []
         self.finish_calls: list[str] = []
 
@@ -37,7 +37,7 @@ class _RecordingBackend(Backend):
     def log_lines(self, lines: list[str]) -> None:
         _ = lines
 
-    def log_media(self, key: str, step: int | None, media: list[Media]) -> None:
+    def log_media(self, key: str, step: int | None, media: Sequence[Media]) -> None:
         self.media_calls.append((key, step, media))
 
     def log_artifact(self, artifact: Artifact) -> Future[None]:
@@ -119,7 +119,7 @@ def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
     uploads = backend.artifact_calls[0].uploads()
     assert isinstance(uploads[0], ArtifactDataUpload)
     assert uploads[0].path == "source-code.zip"
-    archive_bytes = base64.b64decode(uploads[0].data)
+    archive_bytes = uploads[0].data
     with ZipFile(BytesIO(archive_bytes)) as archive:
         assert archive.namelist() == ["keep.py"]
         assert archive.read("keep.py") == b"print('keep')\n"
@@ -162,7 +162,7 @@ def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: p
     uploads = backend.artifact_calls[0].uploads()
     assert isinstance(uploads[0], ArtifactDataUpload)
     assert uploads[0].path == "working-tree.patch"
-    assert base64.b64decode(uploads[0].data) == tracked_patch
+    assert uploads[0].data == tracked_patch
 
 
 def test_log_model_logs_bytes_checkpoint() -> None:
@@ -179,7 +179,7 @@ def test_log_model_logs_bytes_checkpoint() -> None:
     upload = artifact.uploads()[0]
     assert isinstance(upload, ArtifactDataUpload)
     assert upload.path == "checkpoint.bin"
-    assert upload.data == base64.b64encode(b"weights").decode("ascii")
+    assert upload.data == b"weights"
 
 
 def test_finish_is_idempotent_and_blocks_future_writes() -> None:
