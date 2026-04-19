@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import underfit
-from underfit import Html
+from underfit import Artifact, Html
 
 
 def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
@@ -14,6 +14,8 @@ def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
     handle = remote_env["handle"]
     project = remote_env["project"]
     auth = {"Authorization": f"Bearer {remote_env['api_key']}"}
+    local_file = remote_env["local_file"]
+    reference_file = remote_env["reference_file"]
 
     run = underfit.init(
         project=project, name="alpha", remote_url="http://testserver",
@@ -23,7 +25,11 @@ def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
     underfit.log({"loss": 0.4, "accuracy": 0.92}, step=2)
     run.backend.log_lines(["hello", "world"])
     underfit.log({"sample": Html("<h1>ok</h1>", caption="hi")}, step=1)
-    underfit.log_model(b'{"x": 1}', name="ds").result()
+    artifact = Artifact("bundle", "dataset", metadata={"format": "json", "tag": "best"}, step=7)
+    artifact.add_file(local_file)
+    artifact.add_bytes(b'{"x": 1}', name="inline.json")
+    artifact.add_url(reference_file.as_uri())
+    run.log_artifact(artifact).result()
 
     underfit.finish()
 
@@ -63,11 +69,17 @@ def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
     assert artifacts_resp.status_code == 200, artifacts_resp.text
     artifacts = artifacts_resp.json()
     assert len(artifacts) == 1
-    assert artifacts[0]["name"] == "ds"
-    assert artifacts[0]["type"] == "model"
+    assert artifacts[0]["name"] == "bundle"
+    assert artifacts[0]["type"] == "dataset"
+    assert artifacts[0]["step"] == 7
+    assert artifacts[0]["metadata"] == {"format": "json", "tag": "best"}
     assert artifacts[0]["finalizedAt"] is not None
 
     artifact_id = artifacts[0]["id"]
-    file_resp = client.get(f"/api/v1/artifacts/{artifact_id}/files/checkpoint.bin", headers=auth)
-    assert file_resp.status_code == 200
-    assert file_resp.content == b'{"x": 1}'
+    local_file_resp = client.get(f"/api/v1/artifacts/{artifact_id}/files/payload.json", headers=auth)
+    assert local_file_resp.status_code == 200
+    assert local_file_resp.content == b'{"y": 2}'
+
+    inline_file_resp = client.get(f"/api/v1/artifacts/{artifact_id}/files/inline.json", headers=auth)
+    assert inline_file_resp.status_code == 200
+    assert inline_file_resp.content == b'{"x": 1}'

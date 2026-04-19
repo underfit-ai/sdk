@@ -32,27 +32,14 @@ def api_tmp_path(tmp_path: Path) -> Iterator[Path]:
     original_database = config.database
     original_storage = config.storage
     original_auth = config.auth_enabled
-    original_backfill = config.backfill
     db.engine.dispose()
     yield tmp_path
     db.engine.dispose()
     config.database = original_database
     config.storage = original_storage
     config.auth_enabled = original_auth
-    config.backfill = original_backfill
     db.engine = db.build_engine()
     storage_mod.storage = storage_mod.build_storage()
-
-
-def _configure_api(tmp_path: Path, *, auth_enabled: bool, backfill: BackfillConfig | None = None) -> None:
-    config.database = SqliteDatabaseConfig(path=str(tmp_path / "db.sqlite"))
-    config.storage = FileStorageConfig(base=str(tmp_path / "storage"))
-    config.auth_enabled = auth_enabled
-    config.backfill = backfill or BackfillConfig()
-    db.engine = db.build_engine()
-    storage_mod.storage = storage_mod.build_storage()
-    metadata.drop_all(db.engine)
-    metadata.create_all(db.engine)
 
 
 def _reset_sdk_state() -> None:
@@ -72,31 +59,37 @@ def reset_sdk() -> Iterator[None]:
             _reset_sdk_state()
 
 
-def _create_user_with_api_key(handle: str, project_name: str) -> tuple[str, str, str]:
+@pytest.fixture
+def remote_env(api_tmp_path: Path, reset_sdk: None) -> Iterator[dict[str, Any]]:
+    """Boot the API with auth + a user/project/API key, and patch the SDK's urlopen."""
+    config.database = SqliteDatabaseConfig(path=str(api_tmp_path / "db.sqlite"))
+    config.storage = FileStorageConfig(base=str(api_tmp_path / "storage"))
+    config.auth_enabled = True
+    db.engine = db.build_engine()
+    storage_mod.storage = storage_mod.build_storage()
+    metadata.drop_all(db.engine)
+    metadata.create_all(db.engine)
+
+    handle, project_name = "owner", "vision"
     with db.engine.begin() as conn:
         user = users_repo.create(conn, f"{handle}@example.com", handle, "Test User")
         accounts_repo.create_alias(conn, user.id, handle)
         project = projects_repo.create(conn, user.id, project_name, "e2e", "private", {})
         projects_repo.create_alias(conn, project.id, user.id, project_name)
         api_key = api_keys_repo.create(conn, user.id, "e2e")
-    return api_key.token, handle, project_name
 
-
-@pytest.fixture
-def remote_env(api_tmp_path: Path, reset_sdk: None) -> Iterator[dict[str, Any]]:
-    """Boot the API with auth + a user/project/API key, and patch the SDK's urlopen."""
-    _configure_api(api_tmp_path, auth_enabled=True)
-    api_key, handle, project_name = _create_user_with_api_key("owner", "vision")
-    previous_api_key = os.environ.get("UNDERFIT_API_KEY")
-    os.environ["UNDERFIT_API_KEY"] = api_key
+    local_file = api_tmp_path / "payload.json"
+    local_file.write_bytes(b'{"y": 2}')
+    reference_file = api_tmp_path / "model-card.txt"
+    reference_file.write_text("model-card\n", encoding="utf-8")
+    os.environ["UNDERFIT_API_KEY"] = api_key.token
     with TestClient(app) as client, patch(
         "underfit.backends.remote.urllib.request.urlopen", side_effect=_make_urlopen_shim(client),
     ):
-        yield {"client": client, "handle": handle, "project": project_name, "api_key": api_key}
-    if previous_api_key is None:
-        os.environ.pop("UNDERFIT_API_KEY", None)
-    else:
-        os.environ["UNDERFIT_API_KEY"] = previous_api_key
+        yield {
+            "client": client, "handle": handle, "project": project_name, "api_key": api_key.token,
+            "local_file": local_file, "reference_file": reference_file,
+        }
 
 
 @pytest.fixture
@@ -109,11 +102,10 @@ def local_env(api_tmp_path: Path, reset_sdk: None) -> dict[str, Any]:  # noqa: A
 
 def boot_backfill_client(api_tmp_path: Path, log_dir: Path) -> TestClient:
     """Configure the API for backfill from ``log_dir`` and return an entered TestClient."""
-    backfill = BackfillConfig(enabled=True, scan_interval_ms=100, debounce_ms=50, realtime=False)
+    backfill = BackfillConfig(enabled=True, scan_interval_s=1, debounce_ms=50)
     config.database = SqliteDatabaseConfig(path=str(api_tmp_path / "db.sqlite"))
-    config.storage = FileStorageConfig(base=str(log_dir))
+    config.storage = FileStorageConfig(base=str(log_dir), backfill=backfill)
     config.auth_enabled = False
-    config.backfill = backfill
     db.engine = db.build_engine()
     storage_mod.storage = storage_mod.build_storage()
     metadata.drop_all(db.engine)
