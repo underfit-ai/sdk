@@ -184,14 +184,15 @@ class RemoteBackend:
             body["step"] = artifact.step
         created = self._request("POST", f"{self._runs_url}/{self.run_name}/artifacts", body, auth="api_key")
         for upload in artifact.uploads():
+            url = f"{self._api_url}/artifacts/{created['id']}/files/{upload.path}"
             if isinstance(upload, ArtifactPathUpload):
-                file_data = Path(upload.source_path).read_bytes()
+                source = Path(upload.source_path)
+                with source.open("rb") as stream:
+                    self._request_raw("PUT", url, stream, source.stat().st_size, auth="api_key")
             elif isinstance(upload, ArtifactDataUpload):
-                file_data = upload.data
+                self._request_raw("PUT", url, upload.data, len(upload.data), auth="api_key")
             else:
                 raise RuntimeError("Artifact upload is missing file content")
-            url = f"{self._api_url}/artifacts/{created['id']}/files/{upload.path}"
-            self._request_raw("PUT", url, file_data, auth="api_key")
         manifest = asdict(artifact.manifest())
         url = f"{self._api_url}/artifacts/{created['id']}/finalize"
         self._request("POST", url, {"manifest": manifest}, auth="api_key")
@@ -207,9 +208,12 @@ class RemoteBackend:
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())
 
-    def _request_raw(self, method: str, url: str, data: bytes, *, auth: str = "worker") -> None:
+    def _request_raw(
+        self, method: str, url: str, data: Any, length: int, *, auth: str = "worker",
+    ) -> None:
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Content-Type", "application/octet-stream")
+        req.add_header("Content-Length", str(length))
         token = self._api_key if auth == "api_key" else self._worker_token
         req.add_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(req) as resp:

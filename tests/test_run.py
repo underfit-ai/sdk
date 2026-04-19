@@ -6,13 +6,11 @@ import importlib
 import subprocess
 from collections.abc import Sequence
 from concurrent.futures import Future
-from io import BytesIO
 from pathlib import Path
-from zipfile import ZipFile
 
 import pytest
 
-from underfit.artifact import Artifact, ArtifactDataUpload
+from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.backends import Backend
 from underfit.media import Html, Image, Media
 from underfit.run import Run
@@ -118,12 +116,10 @@ def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
     ).result()
     assert [logged.name for logged in backend.artifact_calls] == ["source-code"]
     uploads = backend.artifact_calls[0].uploads()
-    assert isinstance(uploads[0], ArtifactDataUpload)
-    assert uploads[0].path == "source-code.zip"
-    archive_bytes = uploads[0].data
-    with ZipFile(BytesIO(archive_bytes)) as archive:
-        assert archive.namelist() == ["keep.py"]
-        assert archive.read("keep.py") == b"print('keep')\n"
+    assert len(uploads) == 1
+    assert isinstance(uploads[0], ArtifactPathUpload)
+    assert uploads[0].path == "keep.py"
+    assert Path(uploads[0].source_path).read_bytes() == b"print('keep')\n"
 
 
 def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -13,11 +13,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from email.message import Message
 from email.utils import formatdate
-from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Union
 from urllib.parse import unquote, urlparse
-from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from underfit.media import Audio, Html, Image, Media, Video
 
@@ -131,16 +129,12 @@ class Artifact:
         resolved_root = root.resolve()
         include_match = include or (lambda path: path.suffix == ".py")
         paths = sorted((path for path in resolved_root.rglob("*") if path.is_file()), key=lambda path: path.as_posix())
-        matched_paths = [path for path in paths if include_match(path) and (exclude is None or not exclude(path))]
-        if matched_paths:
-            buffer = BytesIO()
-            with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
-                for path in matched_paths:
-                    info = ZipInfo(path.relative_to(resolved_root).as_posix())
-                    info.compress_type = ZIP_DEFLATED
-                    info.date_time = (1980, 1, 1, 0, 0, 0)
-                    archive.writestr(info, path.read_bytes())
-            artifact.add_bytes(buffer.getvalue(), name=f"{artifact.name}.zip")
+        for path in paths:
+            if include_match(path) and (exclude is None or not exclude(path)):
+                artifact._upload_files.append(ArtifactPathUpload(
+                    path=artifact._normalize_artifact_path(path.relative_to(resolved_root).as_posix()),
+                    source_path=str(path),
+                ))
         return artifact
 
     @classmethod
