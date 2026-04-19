@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from concurrent.futures import Future
 from pathlib import Path
 from types import TracebackType
@@ -42,6 +43,9 @@ class Run:
         self.config = {} if config is None else dict(config)
         self._finished = False
         self._on_finish = on_finish
+        self._scalar_lock = threading.Lock()
+        self._pending_step: int | None = None
+        self._pending_values: dict[str, float] = {}
 
     def _require_active(self) -> None:
         if self._finished:
@@ -114,9 +118,28 @@ class Run:
                 raise TypeError(f"Unsupported value for underfit.Run.log: {key}")
 
         if scalar_values:
-            self.backend.log_scalars(scalar_values, step)
+            self._buffer_scalars(scalar_values, step)
         for key, media_list in media_batches:
             self.backend.log_media(key, step, media_list)
+
+    def _buffer_scalars(self, values: dict[str, float], step: int | None) -> None:
+        with self._scalar_lock:
+            if step is None:
+                self._flush_pending_locked()
+                self.backend.log_scalars(values, None)
+            elif self._pending_step is None or step == self._pending_step:
+                self._pending_step = step
+                self._pending_values.update(values)
+            else:
+                self._flush_pending_locked()
+                self._pending_step = step
+                self._pending_values = dict(values)
+
+    def _flush_pending_locked(self) -> None:
+        if self._pending_step is not None:
+            self.backend.log_scalars(self._pending_values, self._pending_step)
+            self._pending_step = None
+            self._pending_values = {}
 
     def log_code(
         self,
@@ -199,5 +222,7 @@ class Run:
         """Finalize the run."""
         if self._finished:
             return
+        with self._scalar_lock:
+            self._flush_pending_locked()
         self.backend.finish(terminal_state)
         self._finished = True

@@ -70,6 +70,7 @@ def test_log_records_scalars_and_media() -> None:
         "report": Html("<h1>ok</h1>"),
         "samples": {"gallery": [Html("<p>a</p>"), Html("<p>b</p>")]},
     }, step=3)
+    run.finish()
 
     assert backend.scalar_calls == [({"train/loss": 1.0, "train/done": 1.0}, 3)]
     assert len(backend.media_calls) == 2
