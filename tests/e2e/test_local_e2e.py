@@ -8,7 +8,7 @@ from typing import Any
 from zipfile import ZipFile
 
 import underfit
-from tests.e2e.conftest import boot_backfill_client
+from tests.e2e.conftest import boot_backfill_client, flatten_scalar_series
 from underfit import Artifact, Html
 
 
@@ -49,16 +49,18 @@ def test_local_backend_round_trip(local_env: dict[str, Any]) -> None:
         run_payload = _wait_for(client, base, predicate=lambda r: r.get("terminalState") == "finished")
         assert run_payload["name"] == "alpha"
 
-        scalars = _wait_for(
-            client, f"{base}/scalars?workerLabel=w0",
-            predicate=lambda points: any(p["step"] == 2 for p in points),
+        scalars_payload = _wait_for(
+            client, f"{base}/scalars",
+            predicate=lambda payload: (2, "loss") in flatten_scalar_series(payload),
         )
-        loss_by_step = {p["step"]: p["values"]["loss"] for p in scalars}
+        loss_by_step = {
+            step: value for (step, key), value in flatten_scalar_series(scalars_payload).items() if key == "loss"
+        }
         assert loss_by_step[1] == 0.5
         assert loss_by_step[2] == 0.4
 
         logs_payload = _wait_for(
-            client, f"{base}/logs?workerLabel=w0",
+            client, f"{base}/logs/w0",
             predicate=lambda payload: bool(payload.get("entries")),
         )
         log_text = "\n".join(entry["content"] for entry in logs_payload["entries"])
@@ -99,6 +101,7 @@ def test_log_code_round_trip(local_env: dict[str, Any]) -> None:
     underfit.finish()
 
     with boot_backfill_client(api_tmp_path, log_dir) as client:
+        _wait_for(client, "/api/v1/accounts/local/projects/vision/runs/alpha", predicate=lambda r: r["name"] == "alpha")
         artifacts = _wait_for(client, "/api/v1/accounts/local/projects/vision/artifacts", predicate=bool)
         assert len(artifacts) == 1
         assert artifacts[0]["name"] == "source-code"

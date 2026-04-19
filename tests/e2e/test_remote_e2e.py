@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import underfit
+from tests.e2e.conftest import flatten_scalar_series
 from underfit import Artifact, Html
 
 
@@ -40,16 +41,15 @@ def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
     assert run_resp.json()["name"] == "alpha"
     assert run_resp.json()["terminalState"] == "finished"
 
-    scalars_resp = client.get(f"{base}/scalars", params={"workerLabel": "w0"}, headers=auth)
+    scalars_resp = client.get(f"{base}/scalars", headers=auth)
     assert scalars_resp.status_code == 200, scalars_resp.text
-    scalars = scalars_resp.json()
-    points = {(p["step"], k): v for p in scalars for k, v in p["values"].items()}
+    points = flatten_scalar_series(scalars_resp.json())
     assert points[(1, "loss")] == 0.5
     assert points[(2, "loss")] == 0.4
     assert points[(1, "accuracy")] == 0.9
     assert points[(2, "accuracy")] == 0.92
 
-    logs_resp = client.get(f"{base}/logs", params={"workerLabel": "w0"}, headers=auth)
+    logs_resp = client.get(f"{base}/logs/w0", headers=auth)
     assert logs_resp.status_code == 200, logs_resp.text
     log_text = "\n".join(entry["content"] for entry in logs_resp.json()["entries"])
     assert "hello" in log_text and "world" in log_text

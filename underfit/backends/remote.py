@@ -8,7 +8,7 @@ import urllib.request
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -69,6 +69,7 @@ class RemoteBackend:
         self._scalar_buffer: list[dict[str, Any]] = []
         self._next_log_line = 0
         self._next_scalar_line = 0
+        self._last_scalar_timestamp: datetime | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._metrics = SystemMetrics()
@@ -90,8 +91,12 @@ class RemoteBackend:
         """Append scalar metric values for a run."""
         if not values:
             return
-        ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         with self._lock:
+            timestamp = datetime.now(timezone.utc)
+            if self._last_scalar_timestamp is not None and timestamp <= self._last_scalar_timestamp:
+                timestamp = self._last_scalar_timestamp + timedelta(microseconds=1)
+            self._last_scalar_timestamp = timestamp
+            ts = timestamp.isoformat(timespec="microseconds").replace("+00:00", "Z")
             self._scalar_buffer.append({"step": step, "values": values, "timestamp": ts})
 
     def log_lines(self, lines: list[str]) -> None:

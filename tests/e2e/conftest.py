@@ -5,19 +5,17 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
 
 os.environ.setdefault("UNDERFIT_APP_SECRET", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 
-import underfit_api.db as db  # noqa: E402
-import underfit_api.storage as storage_mod  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from underfit_api.config import BackfillConfig, FileStorageConfig, SqliteDatabaseConfig, config  # noqa: E402
+from underfit_api.dependencies import AppContext  # noqa: E402
 from underfit_api.main import app  # noqa: E402
-from underfit_api.repositories import accounts as accounts_repo  # noqa: E402
 from underfit_api.repositories import api_keys as api_keys_repo  # noqa: E402
 from underfit_api.repositories import projects as projects_repo  # noqa: E402
 from underfit_api.repositories import users as users_repo  # noqa: E402
@@ -28,18 +26,15 @@ import underfit  # noqa: E402
 
 @pytest.fixture
 def api_tmp_path(tmp_path: Path) -> Iterator[Path]:
-    """Per-test temp dir that resets the API config and disposes resources on teardown."""
-    original_database = config.database
-    original_storage = config.storage
-    original_auth = config.auth_enabled
-    db.engine.dispose()
+    """Per-test temp dir that resets the API config after each test."""
+    snapshot = config.model_copy(deep=True)
     yield tmp_path
-    db.engine.dispose()
-    config.database = original_database
-    config.storage = original_storage
-    config.auth_enabled = original_auth
-    db.engine = db.build_engine()
-    storage_mod.storage = storage_mod.build_storage()
+    for field in type(config).model_fields:
+        setattr(config, field, getattr(snapshot, field))
+
+
+def _ctx() -> AppContext:
+    return cast(AppContext, app.state.ctx)
 
 
 def _reset_sdk_state() -> None:
@@ -65,31 +60,26 @@ def remote_env(api_tmp_path: Path, reset_sdk: None) -> Iterator[dict[str, Any]]:
     config.database = SqliteDatabaseConfig(path=str(api_tmp_path / "db.sqlite"))
     config.storage = FileStorageConfig(base=str(api_tmp_path / "storage"))
     config.auth_enabled = True
-    db.engine = db.build_engine()
-    storage_mod.storage = storage_mod.build_storage()
-    metadata.drop_all(db.engine)
-    metadata.create_all(db.engine)
+    config.backfill = BackfillConfig()
 
     handle, project_name = "owner", "vision"
-    with db.engine.begin() as conn:
-        user = users_repo.create(conn, f"{handle}@example.com", handle, "Test User")
-        accounts_repo.create_alias(conn, user.id, handle)
-        project = projects_repo.create(conn, user.id, project_name, "e2e", "private", {})
-        projects_repo.create_alias(conn, project.id, user.id, project_name)
-        api_key = api_keys_repo.create(conn, user.id, "e2e")
-
     local_file = api_tmp_path / "payload.json"
     local_file.write_bytes(b'{"y": 2}')
     reference_file = api_tmp_path / "model-card.txt"
     reference_file.write_text("model-card\n", encoding="utf-8")
-    os.environ["UNDERFIT_API_KEY"] = api_key.token
-    with TestClient(app) as client, patch(
-        "underfit.backends.remote.urllib.request.urlopen", side_effect=_make_urlopen_shim(client),
-    ):
-        yield {
-            "client": client, "handle": handle, "project": project_name, "api_key": api_key.token,
-            "local_file": local_file, "reference_file": reference_file,
-        }
+    with TestClient(app) as client:
+        metadata.drop_all(_ctx().engine)
+        metadata.create_all(_ctx().engine)
+        with _ctx().engine.begin() as conn:
+            user = users_repo.create(conn, f"{handle}@example.com", handle, "Test User")
+            projects_repo.create(conn, user.id, project_name, "e2e", "private", {})
+            api_key = api_keys_repo.create(conn, user.id, "e2e")
+        os.environ["UNDERFIT_API_KEY"] = api_key.token
+        with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_make_urlopen_shim(client)):
+            yield {
+                "client": client, "handle": handle, "project": project_name, "api_key": api_key.token,
+                "local_file": local_file, "reference_file": reference_file,
+            }
 
 
 @pytest.fixture
@@ -102,15 +92,21 @@ def local_env(api_tmp_path: Path, reset_sdk: None) -> dict[str, Any]:  # noqa: A
 
 def boot_backfill_client(api_tmp_path: Path, log_dir: Path) -> TestClient:
     """Configure the API for backfill from ``log_dir`` and return an entered TestClient."""
-    backfill = BackfillConfig(enabled=True, scan_interval_s=1, debounce_ms=50)
     config.database = SqliteDatabaseConfig(path=str(api_tmp_path / "db.sqlite"))
-    config.storage = FileStorageConfig(base=str(log_dir), backfill=backfill)
+    config.storage = FileStorageConfig(base=str(log_dir))
     config.auth_enabled = False
-    db.engine = db.build_engine()
-    storage_mod.storage = storage_mod.build_storage()
-    metadata.drop_all(db.engine)
-    metadata.create_all(db.engine)
+    config.backfill = BackfillConfig(enabled=True, debounce_s=0.05)
     return TestClient(app)
+
+
+def flatten_scalar_series(payload: dict[str, Any]) -> dict[tuple[int | None, str], float]:
+    """Flatten a scalar series response into ``(step, key) -> value`` pairs."""
+    values: dict[tuple[int | None, str], float] = {}
+    for key, series in payload["series"].items():
+        axis = payload["axes"][series["axis"]]
+        for step, value in zip(axis["steps"], series["values"]):
+            values[(step, key)] = value
+    return values
 
 
 def _make_urlopen_shim(client: TestClient) -> Callable[..., Any]:
