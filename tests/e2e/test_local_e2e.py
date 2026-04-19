@@ -1,11 +1,9 @@
-"""End-to-end test: SDK LocalBackend → backfill → API read endpoints."""
+"""End-to-end test: SDK LocalBackend -> backfill -> API read endpoints."""
 
 from __future__ import annotations
 
-import io
 import time
 from typing import Any
-from zipfile import ZipFile
 
 import underfit
 from tests.e2e.conftest import boot_backfill_client, flatten_scalar_series
@@ -88,7 +86,7 @@ def test_local_backend_round_trip(local_env: dict[str, Any]) -> None:
 
 
 def test_log_code_round_trip(local_env: dict[str, Any]) -> None:
-    """Upload source code through the SDK and fetch the archive through the API."""
+    """Upload source code through the SDK and fetch the stored files through the API."""
     log_dir = local_env["log_dir"]
     api_tmp_path = local_env["api_tmp_path"]
     root = api_tmp_path / "src"
@@ -106,7 +104,9 @@ def test_log_code_round_trip(local_env: dict[str, Any]) -> None:
         assert len(artifacts) == 1
         assert artifacts[0]["name"] == "source-code"
         assert artifacts[0]["type"] == "code"
-        archive = client.get(f"/api/v1/artifacts/{artifacts[0]['id']}/files/source-code.zip")
-        assert archive.status_code == 200
-        with ZipFile(io.BytesIO(archive.content)) as zip_file:
-            assert zip_file.namelist() == ["train.py"]
+        artifact = client.get(f"/api/v1/artifacts/{artifacts[0]['id']}")
+        assert artifact.status_code == 200
+        assert artifact.json()["manifest"]["files"] == ["train.py"]
+        source = client.get(f"/api/v1/artifacts/{artifacts[0]['id']}/files/train.py")
+        assert source.status_code == 200
+        assert source.content == b"print('ok')\n"

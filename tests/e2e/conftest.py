@@ -12,16 +12,15 @@ import pytest
 
 os.environ.setdefault("UNDERFIT_APP_SECRET", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 
-from fastapi.testclient import TestClient  # noqa: E402
-from underfit_api.config import BackfillConfig, FileStorageConfig, SqliteDatabaseConfig, config  # noqa: E402
-from underfit_api.dependencies import AppContext  # noqa: E402
-from underfit_api.main import app  # noqa: E402
-from underfit_api.repositories import api_keys as api_keys_repo  # noqa: E402
-from underfit_api.repositories import projects as projects_repo  # noqa: E402
-from underfit_api.repositories import users as users_repo  # noqa: E402
-from underfit_api.schema import metadata  # noqa: E402
+from fastapi.testclient import TestClient
+from underfit_api.config import BackfillConfig, FileStorageConfig, SqliteDatabaseConfig, config
+from underfit_api.dependencies import AppContext
+from underfit_api.main import app
+from underfit_api.repositories import api_keys as api_keys_repo
+from underfit_api.repositories import projects as projects_repo
+from underfit_api.repositories import users as users_repo
 
-import underfit  # noqa: E402
+import underfit
 
 
 @pytest.fixture
@@ -68,8 +67,6 @@ def remote_env(api_tmp_path: Path, reset_sdk: None) -> Iterator[dict[str, Any]]:
     reference_file = api_tmp_path / "model-card.txt"
     reference_file.write_text("model-card\n", encoding="utf-8")
     with TestClient(app) as client:
-        metadata.drop_all(_ctx().engine)
-        metadata.create_all(_ctx().engine)
         with _ctx().engine.begin() as conn:
             user = users_repo.create(conn, f"{handle}@example.com", handle, "Test User")
             projects_repo.create(conn, user.id, project_name, "e2e", "private", {})

@@ -149,7 +149,7 @@ class Run:
         include: PathFilter | None = None,
         exclude: PathFilter | None = None,
     ) -> Future[None]:
-        """Upload source code under a root path as a zip artifact.
+        """Upload source code under a root path as a code artifact.
 
         Args:
             root_path: Root directory to scan. Defaults to the current working directory.
