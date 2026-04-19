@@ -72,7 +72,7 @@ class RemoteBackend:
         self._last_scalar_timestamp: datetime | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._metrics = SystemMetrics()
+        self._metrics = SystemMetrics(worker_label)
         self._upload_pool = ThreadPoolExecutor(max_workers=4)
 
         body: dict[str, Any] = {"runName": run_name, "launchId": launch_id, "workerLabel": worker_label}

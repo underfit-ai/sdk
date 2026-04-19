@@ -47,7 +47,7 @@ class LocalBackend:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self._run_meta = {"project": project_name, "name": self.run_name, "config": run_config}
         self._write_run_meta()
-        self._metrics = SystemMetrics()
+        self._metrics = SystemMetrics(worker_label)
         self._scalar_lock = threading.Lock()
         self._stop = threading.Event()
         if self._metrics.available:
