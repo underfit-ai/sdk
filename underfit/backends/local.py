@@ -45,7 +45,9 @@ class LocalBackend:
         self._worker_label = worker_label
         self.run_dir = Path(root_dir or Path.cwd() / "underfit") / str(uuid4())
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        self._run_meta = {"project": project_name, "name": self.run_name, "config": run_config}
+        self._run_meta: dict[str, Any] = {
+            "project": project_name, "name": self.run_name, "config": run_config, "summary": {},
+        }
         self._write_run_meta()
         self._metrics = SystemMetrics(worker_label)
         self._scalar_lock = threading.Lock()
@@ -63,6 +65,8 @@ class LocalBackend:
         ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         with self._scalar_lock, path.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"step": step, "values": values, "timestamp": ts}, sort_keys=True) + "\n")
+            self._run_meta["summary"] = dict(values)
+            self._write_run_meta()
 
     def log_lines(self, lines: list[str]) -> None:
         """Append console log lines for the run's worker."""

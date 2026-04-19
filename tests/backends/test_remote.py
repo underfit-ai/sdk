@@ -100,7 +100,7 @@ def test_finish_flushes_scalar_buffer_and_updates_terminal_state() -> None:
 
     with patch(
         "underfit.backends.remote.urllib.request.urlopen",
-        side_effect=_mock_urlopen(reqs, [{"nextStartLine": 1}, {}]),
+        side_effect=_mock_urlopen(reqs, [{"nextStartLine": 1}, {}, {}]),
     ):
         backend.log_scalars({"loss": 0.5}, step=3)
         backend.finish("failed")
@@ -108,4 +108,5 @@ def test_finish_flushes_scalar_buffer_and_updates_terminal_state() -> None:
     assert reqs[0][2]["startLine"] == 0
     assert reqs[0][2]["scalars"][0]["step"] == 3
     assert reqs[0][2]["scalars"][0]["values"] == {"loss": 0.5}
-    assert reqs[1] == ("PUT", f"{API_URL}/api/v1/runs/terminal-state", {"terminalState": "failed"})
+    assert reqs[1] == ("PUT", f"{API_URL}/api/v1/runs/summary", {"summary": {"loss": 0.5}})
+    assert reqs[2] == ("PUT", f"{API_URL}/api/v1/runs/terminal-state", {"terminalState": "failed"})

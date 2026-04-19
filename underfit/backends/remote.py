@@ -70,6 +70,9 @@ class RemoteBackend:
         self._next_log_line = 0
         self._next_scalar_line = 0
         self._last_scalar_timestamp: datetime | None = None
+        self._summary: dict[str, float] = {}
+        self._summary_dirty = False
+        self._summary_sent: dict[str, float] = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._metrics = SystemMetrics(worker_label)
@@ -98,6 +101,8 @@ class RemoteBackend:
             self._last_scalar_timestamp = timestamp
             ts = timestamp.isoformat(timespec="microseconds").replace("+00:00", "Z")
             self._scalar_buffer.append({"step": step, "values": values, "timestamp": ts})
+            self._summary = dict(values)
+            self._summary_dirty = True
 
     def log_lines(self, lines: list[str]) -> None:
         """Append console log lines for the run's worker."""
@@ -140,6 +145,7 @@ class RemoteBackend:
         self._upload_pool.shutdown(wait=True)
         self._flush_logs()
         self._flush_scalars()
+        self._flush_summary()
         body = {"terminalState": terminal_state}
         self._request("PUT", f"{self._api_url}/runs/terminal-state", body, auth="worker")
 
@@ -153,6 +159,7 @@ class RemoteBackend:
         while not self._stop.wait(timeout=2.0):
             flushed = self._flush_logs()
             flushed = self._flush_scalars() or flushed
+            flushed = self._flush_summary() or flushed
             if not flushed:
                 self._request("POST", f"{self._api_url}/workers/heartbeat")
 
@@ -174,6 +181,18 @@ class RemoteBackend:
         body = {"startLine": self._next_scalar_line, "scalars": scalars}
         resp = self._request("POST", f"{self._api_url}/ingest/scalars", body)
         self._next_scalar_line = resp["nextStartLine"]
+        return True
+
+    def _flush_summary(self) -> bool:
+        with self._lock:
+            if not self._summary_dirty:
+                return False
+            summary = dict(self._summary)
+            self._summary_dirty = False
+        if summary == self._summary_sent:
+            return False
+        self._request("PUT", f"{self._api_url}/runs/summary", {"summary": summary})
+        self._summary_sent = summary
         return True
 
     def _upload_artifact(self, artifact: Artifact) -> None:

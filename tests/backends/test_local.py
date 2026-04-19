@@ -32,7 +32,8 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     assert metadata["name"] == "Trial A"
     assert metadata["config"] == {"lr": 0.01}
     assert metadata["terminal_state"] == "finished"
-    assert set(metadata.keys()) == {"project", "name", "config", "terminal_state"}
+    assert metadata["summary"] == {"loss": 0.8}
+    assert set(metadata.keys()) == {"project", "name", "config", "terminal_state", "summary"}
 
     scalar_path = backend.run_dir / "scalars" / "worker-7" / "r1" / "0.jsonl"
     scalar_lines = [json.loads(line) for line in scalar_path.read_text().splitlines()]
