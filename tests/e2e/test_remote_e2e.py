@@ -85,6 +85,32 @@ def test_remote_client_round_trip(remote_env: dict[str, Any]) -> None:
     assert inline_file_resp.content == b'{"x": 1}'
 
 
+def test_remote_client_reads_runs_and_artifacts(remote_env: dict[str, Any]) -> None:
+    """Use Project.list_runs / Run.list_artifacts / ArtifactRef.download via the SDK read path."""
+    handle, project_name = remote_env["handle"], remote_env["project"]
+
+    run = underfit.init(project=project_name, name="alpha", remote_url="http://testserver", worker_label="w0")
+    artifact = Artifact("ckpt", "model")
+    artifact.add_bytes(b"weights", name="model.bin")
+    run.log_artifact(artifact).result()
+    project_artifact = Artifact("eval-set", "dataset")
+    project_artifact.add_bytes(b'{"x": 1}', name="payload.json")
+    run.project.log_artifact(project_artifact).result()
+    underfit.finish()
+
+    proj = underfit.project(f"{handle}/{project_name}", remote_url="http://testserver")
+    [run_ref] = proj.list_runs()
+    assert run_ref.name == "alpha" and run_ref.terminal_state == "finished"
+
+    [run_artifact] = run_ref.list_artifacts()
+    assert run_artifact.name == "ckpt"
+    assert run_artifact.read("model.bin") == b"weights"
+
+    [project_ref] = proj.list_artifacts()
+    assert project_ref.name == "eval-set"
+    assert project_ref.read("payload.json") == b'{"x": 1}'
+
+
 def test_remote_project_artifact_round_trip(remote_env: dict[str, Any]) -> None:
     """Project-level artifacts upload via Project.log_artifact and appear with no run attached."""
     client = remote_env["client"]

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from concurrent.futures import Future
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from underfit.artifact import Artifact
 from underfit.clients.local import LocalClient
 from underfit.clients.remote import RemoteClient
 from underfit.media import Media
 from underfit.project import Project
+
+if TYPE_CHECKING:
+    from underfit.run import Run
 
 TerminalState = Literal["finished", "failed", "cancelled"]
 
@@ -36,6 +39,15 @@ class Client(Protocol):
 
     def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
         """Store an artifact directly under a project."""
+
+    def list_runs(self, project: Project) -> list[Run]:
+        """Return the runs stored under a project."""
+
+    def get_run(self, project: Project, name: str) -> Run:
+        """Return a single run by name."""
+
+    def list_artifacts(self, project: Project, run: Run | None = None) -> list[Artifact]:
+        """Return project-scoped artifacts, or run-scoped artifacts when ``run`` is given."""
 
     def finish(self, terminal_state: TerminalState = "finished") -> None:
         """Finalize a run and flush client state."""

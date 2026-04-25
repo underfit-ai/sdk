@@ -53,14 +53,30 @@ def test_local_client_writes_backfill_layout(tmp_path: Path) -> None:
     assert media_path.read_text() == "<h1>ok</h1>"
 
 
-def test_local_client_writes_project_artifact_under_project_dir(tmp_path: Path) -> None:
-    """Project-level artifacts land in the layout the API backfill walks for project artifacts."""
-    client = LocalClient(project="Vision", root_dir=tmp_path)
+def test_local_client_reads_back_runs_and_artifacts(tmp_path: Path) -> None:
+    """Round-trip writes and reads through the local client: runs, run artifacts, project artifacts."""
+    writer = LocalClient(project="Vision", root_dir=tmp_path)
+    writer.launch_run(run_name="alpha", run_config={"lr": 0.01}, worker_label="w0")
+    writer.log_scalars({"loss": 0.4}, step=1)
+    run_artifact = Artifact("ckpt", "model")
+    run_artifact.add_bytes(b"weights", name="model.bin")
+    writer.log_artifact(run_artifact).result()
+    project_artifact = Artifact("eval-set", "dataset")
+    project_artifact.add_bytes(b'{"x": 1}', name="payload.json")
+    writer.log_project_artifact(writer.project, project_artifact).result()
+    writer.finish()
 
-    artifact = Artifact("eval-set", "dataset")
-    artifact.add_bytes(b"{}", name="payload.json")
-    client.log_project_artifact(client.project, artifact).result()
+    reader = LocalClient(project="Vision", root_dir=tmp_path)
+    [run] = reader.project.list_runs()
+    assert run.name == "alpha"
+    assert run.summary == {"loss": 0.4}
+    assert run.terminal_state == "finished"
+    assert reader.project.get_run("alpha").id == run.id
 
-    [artifact_dir] = (tmp_path / "projects" / "Vision" / "artifacts").iterdir()
-    assert (artifact_dir / "files" / "payload.json").read_bytes() == b"{}"
-    assert json.loads((artifact_dir / "artifact.json").read_text())["name"] == "eval-set"
+    [run_ref] = run.list_artifacts()
+    assert run_ref.name == "ckpt" and run_ref.files == ["model.bin"]
+    assert run_ref.read("model.bin") == b"weights"
+
+    [project_ref] = reader.project.list_artifacts()
+    project_ref.download(tmp_path / "out")
+    assert (tmp_path / "out" / "payload.json").read_bytes() == b'{"x": 1}'

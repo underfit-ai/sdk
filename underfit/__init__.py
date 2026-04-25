@@ -18,10 +18,10 @@ from underfit.clients import Client, LocalClient, RemoteClient, TerminalState
 from underfit.lib.terminal import capture
 from underfit.media import Audio, Html, Image, Video
 from underfit.project import Project
-from underfit.run import PathFilter, PathLike, PathOrBytes, RunSession
+from underfit.run import PathFilter, PathLike, PathOrBytes, Run, RunSession
 
 __all__ = [
-    "Artifact", "Audio", "Html", "Image", "Project", "RunSession", "Video",
+    "Artifact", "Audio", "Html", "Image", "Project", "Run", "RunSession", "Video",
     "finish", "init", "log", "log_git", "log_model", "project", "session",
 ]
 

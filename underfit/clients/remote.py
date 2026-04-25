@@ -11,13 +11,25 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.lib.metrics import SystemMetrics
 from underfit.media import Media
 from underfit.project import Project
+
+if TYPE_CHECKING:
+    from underfit.run import Run
+
+
+def _run_from_payload(project: Project, payload: dict[str, Any]) -> Run:
+    from underfit.run import Run  # noqa: PLC0415
+    return Run(
+        project=project, id=payload["id"], name=payload["name"],
+        config=payload.get("config") or {}, summary=payload.get("summary") or {},
+        terminal_state=payload.get("terminalState"), created_at=payload.get("createdAt"),
+    )
 
 
 def _multipart_body(metadata: dict[str, Any], files: list[tuple[bytes, str]]) -> tuple[bytes, str]:
@@ -133,6 +145,38 @@ class RemoteClient:
         url = f"{self._api_url}/accounts/{project.handle}/projects/{project.name}/artifacts"
         return self._upload_pool.submit(self._upload_artifact, url, artifact)
 
+    def list_runs(self, project: Project) -> list[Run]:
+        """Return the runs stored under a project."""
+        url = f"{self._api_url}/accounts/{project.handle}/projects/{project.name}/runs"
+        return [_run_from_payload(project, payload) for payload in self._request("GET", url, auth="api_key")]
+
+    def get_run(self, project: Project, name: str) -> Run:
+        """Return a single run by name."""
+        url = f"{self._api_url}/accounts/{project.handle}/projects/{project.name}/runs/{name}"
+        return _run_from_payload(project, self._request("GET", url, auth="api_key"))
+
+    def list_artifacts(self, project: Project, run: Run | None = None) -> list[Artifact]:
+        """Return project-scoped artifacts, or run-scoped artifacts when ``run`` is given."""
+        url = f"{self._api_url}/accounts/{project.handle}/projects/{project.name}/artifacts"
+        run_id = run.id if run else None
+        return [self._build_stored(p) for p in self._request("GET", url, auth="api_key") if p.get("runId") == run_id]
+
+    def _build_stored(self, payload: dict[str, Any]) -> Artifact:
+        artifact_id = payload["id"]
+        detail = self._request("GET", f"{self._api_url}/artifacts/{artifact_id}", auth="api_key")
+        return Artifact.from_stored(
+            name=payload["name"], type=payload["type"],
+            metadata=payload.get("metadata"), step=payload.get("step"),
+            files=list(detail["manifest"]["files"]),
+            reader=lambda path, _id=artifact_id: self._read_file(_id, path),
+        )
+
+    def _read_file(self, artifact_id: str, file_path: str) -> bytes:
+        req = urllib.request.Request(f"{self._api_url}/artifacts/{artifact_id}/files/{file_path}", method="GET")
+        req.add_header("Authorization", f"Bearer {self._api_key}")
+        with urllib.request.urlopen(req) as resp:
+            return resp.read()
+
     def finish(self, terminal_state: str = "finished") -> None:
         """Finalize a run and flush client state."""
         self._stop.set()
@@ -216,7 +260,7 @@ class RemoteClient:
 
     def _request(
         self, method: str, url: str, body: dict[str, Any] | None = None, *, auth: str = "worker",
-    ) -> dict[str, Any]:
+    ) -> Any:
         data = json.dumps(body).encode() if body else None
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Content-Type", "application/json")

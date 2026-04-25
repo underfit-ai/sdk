@@ -5,18 +5,21 @@ from __future__ import annotations
 import json
 import shutil
 import threading
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from concurrent.futures import Future
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.lib.metrics import SystemMetrics
 from underfit.media import Html, Media
 from underfit.project import Project
+
+if TYPE_CHECKING:
+    from underfit.run import Run
 
 
 class LocalClient:
@@ -94,6 +97,62 @@ class LocalClient:
     def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
         """Store an artifact directly under a project."""
         return self._write_artifact(self._root_dir / "projects" / project.name / "artifacts", artifact)
+
+    def list_runs(self, project: Project) -> list[Run]:
+        """Return the runs stored under a project."""
+        return [run for _, run in self._iter_runs(project)]
+
+    def get_run(self, project: Project, name: str) -> Run:
+        """Return a single run by name."""
+        for _, run in self._iter_runs(project):
+            if run.name == name:
+                return run
+        raise FileNotFoundError(f"run {name!r} not found in project {project.name!r}")
+
+    def list_artifacts(self, project: Project, run: Run | None = None) -> list[Artifact]:
+        """Return project-scoped artifacts, or run-scoped artifacts when ``run`` is given."""
+        if run is None:
+            return self._read_artifacts(self._root_dir / "projects" / project.name / "artifacts")
+        for run_dir, found in self._iter_runs(project):
+            if found.id == run.id:
+                return self._read_artifacts(run_dir / "artifacts")
+        return []
+
+    def _iter_runs(self, project: Project) -> Iterator[tuple[Path, Run]]:
+        from underfit.run import Run  # noqa: PLC0415
+        if not self._root_dir.is_dir():
+            return
+        for entry in sorted(self._root_dir.iterdir()):
+            meta_path = entry / "run.json"
+            if not entry.is_dir() or not meta_path.is_file():
+                continue
+            meta = json.loads(meta_path.read_text())
+            if meta.get("project") != project.name:
+                continue
+            yield entry, Run(
+                project=project, id=entry.name, name=meta["name"],
+                config=meta.get("config") or {}, summary=meta.get("summary") or {},
+                terminal_state=meta.get("terminal_state"),
+            )
+
+    def _read_artifacts(self, parent: Path) -> list[Artifact]:
+        if not parent.is_dir():
+            return []
+        result: list[Artifact] = []
+        for entry in sorted(parent.iterdir()):
+            info_path, manifest_path = entry / "artifact.json", entry / "manifest.json"
+            if not entry.is_dir() or not info_path.is_file() or not manifest_path.is_file():
+                continue
+            info = json.loads(info_path.read_text())
+            manifest = json.loads(manifest_path.read_text())
+            files_dir = entry / "files"
+            result.append(Artifact.from_stored(
+                name=info["name"], type=info["type"],
+                metadata=info.get("metadata"), step=info.get("step"),
+                files=list(manifest.get("files") or []),
+                reader=lambda path, _dir=files_dir: (_dir / path).read_bytes(),
+            ))
+        return result
 
     def _write_artifact(self, parent: Path, artifact: Artifact) -> Future[None]:
         artifact_dir = parent / str(uuid4())

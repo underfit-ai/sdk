@@ -1,17 +1,37 @@
-"""Active run session for Underfit."""
+"""Run types for Underfit."""
 
 from __future__ import annotations
 
 import threading
 from concurrent.futures import Future
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Callable, Union
+from typing import TYPE_CHECKING, Any, Callable, Union
 
 from underfit.artifact import Artifact
-from underfit.clients import Client, TerminalState
 from underfit.media import Audio, Html, Image, Video
 from underfit.project import Project
+
+if TYPE_CHECKING:
+    from underfit.clients import Client, TerminalState
+
+
+@dataclass
+class Run:
+    """Read-only reference to a run already stored by Underfit."""
+
+    project: Project
+    id: str
+    name: str
+    config: dict[str, Any] = field(default_factory=dict)
+    summary: dict[str, float] = field(default_factory=dict)
+    terminal_state: str | None = None
+    created_at: str | None = None
+
+    def list_artifacts(self) -> list[Artifact]:
+        """Return artifacts attached to this run."""
+        return self.project.client.list_artifacts(self.project, self)
 
 PathLike = Union[str, Path]
 PathOrBytes = Union[str, Path, bytes, bytearray, memoryview]

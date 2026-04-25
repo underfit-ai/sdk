@@ -15,7 +15,7 @@ from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.clients import Client
 from underfit.media import Html, Image, Media
 from underfit.project import Project
-from underfit.run import RunSession
+from underfit.run import Run, RunSession
 
 artifact_module = importlib.import_module("underfit.artifact")
 
@@ -49,6 +49,18 @@ class _RecordingClient(Client):
     def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
         _ = project
         return self.log_artifact(artifact)
+
+    def list_runs(self, project: Project) -> list[Run]:
+        _ = project
+        return []
+
+    def get_run(self, project: Project, name: str) -> Run:
+        _ = project, name
+        raise FileNotFoundError(name)
+
+    def list_artifacts(self, project: Project, run: Run | None = None) -> list[Artifact]:
+        _ = project, run
+        return []
 
     def finish(self, terminal_state: str = "finished") -> None:
         self.finish_calls.append(terminal_state)
