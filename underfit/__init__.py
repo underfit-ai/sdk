@@ -17,21 +17,21 @@ from underfit.artifact import Artifact
 from underfit.clients import Client, LocalClient, RemoteClient, TerminalState
 from underfit.lib.terminal import capture
 from underfit.media import Audio, Html, Image, Video
-from underfit.run import PathFilter, PathLike, PathOrBytes, Run
+from underfit.run import PathFilter, PathLike, PathOrBytes, RunSession
 
 __all__ = [
-    "Artifact", "Audio", "Html", "Image", "Run", "Video",
-    "finish", "init", "log", "log_git", "log_model", "run",
+    "Artifact", "Audio", "Html", "Image", "RunSession", "Video",
+    "finish", "init", "log", "log_git", "log_model", "session",
 ]
 
-run: Run | None = None
+session: RunSession | None = None
 _capture_context: AbstractContextManager[None] | None = None
 
 
-def _require_run() -> Run:
-    if run is None:
+def _require_session() -> RunSession:
+    if session is None:
         raise RuntimeError("underfit.init must be called before using the active run")
-    return run
+    return session
 
 
 def _default_worker_label() -> str:
@@ -73,8 +73,8 @@ def init(
     remote_url: str | None = None,
     launch_id: str | None = None,
     worker_label: str | None = None,
-) -> Run:
-    """Initialize a new Underfit run.
+) -> RunSession:
+    """Initialize a new Underfit run session.
 
     Args:
         project: Project identifier as either ``"<account-handle>/<project-name>"`` or a bare
@@ -88,9 +88,9 @@ def init(
         worker_label: Label identifying this worker within the run. Defaults
             to a value derived from the hostname when omitted.
     """
-    global run, _capture_context  # noqa: PLW0603
-    if run is not None:
-        return run
+    global session, _capture_context  # noqa: PLW0603
+    if session is not None:
+        return session
 
     resolved_config = dict(config or {})
     resolved_name = name.strip() if name else _generate_run_name()
@@ -117,15 +117,15 @@ def init(
             worker_label=resolved_worker_label,
         )
 
-    run = Run(project=project, name=client.run_name, client=client, config=resolved_config, on_finish=finish)
+    session = RunSession(project=project, name=client.run_name, client=client, config=resolved_config, on_finish=finish)
     _capture_context = _capture_output(client)
     _capture_context.__enter__()
-    return run
+    return session
 
 
 def log(data: dict[str, Any], step: int | None = None) -> None:
     """Log metrics to the current run."""
-    _require_run().log(data, step=step)
+    _require_session().log(data, step=step)
 
 
 def log_code(
@@ -136,26 +136,26 @@ def log_code(
     exclude: PathFilter | None = None
 ) -> Future[None]:
     """Log the source code under a root path to the active run."""
-    return _require_run().log_code(root_path, name=name, include=include, exclude=exclude)
+    return _require_session().log_code(root_path, name=name, include=include, exclude=exclude)
 
 
 def log_git(repo_path: PathLike | None = None, *, name: str | None = None) -> Future[None]:
     """Log the current git state to the active run."""
-    return _require_run().log_git(repo_path, name=name)
+    return _require_session().log_git(repo_path, name=name)
 
 
 def log_model(checkpoint: PathOrBytes, *, name: str | None = None, step: int | None = None) -> Future[None]:
     """Log a model checkpoint to the current run."""
-    return _require_run().log_model(checkpoint, name=name, step=step)
+    return _require_session().log_model(checkpoint, name=name, step=step)
 
 
 def finish(terminal_state: TerminalState = "finished") -> None:
     """Finish the current run."""
-    global run, _capture_context  # noqa: PLW0603
-    if run is None:
+    global session, _capture_context  # noqa: PLW0603
+    if session is None:
         return
     if _capture_context is not None:
         _capture_context.__exit__(None, None, None)
         _capture_context = None
-    run.finish(terminal_state)
-    run = None
+    session.finish(terminal_state)
+    session = None

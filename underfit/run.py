@@ -1,4 +1,4 @@
-"""Run model for Underfit."""
+"""Active run session for Underfit."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ PathOrBytes = Union[str, Path, bytes, bytearray, memoryview]
 PathFilter = Callable[[Path], bool]
 
 
-class Run:
-    """Represent an Underfit run."""
+class RunSession:
+    """Represent an active Underfit run being written to."""
 
     def __init__(
         self,
@@ -28,7 +28,7 @@ class Run:
         config: dict[str, Any] | None = None,
         on_finish: Callable[[TerminalState], None] | None = None,
     ) -> None:
-        """Initialize a run.
+        """Initialize a run session.
 
         Args:
             project: Project name.
@@ -51,8 +51,8 @@ class Run:
         if self._finished:
             raise RuntimeError("run is already finished")
 
-    def __enter__(self) -> Run:  # noqa: PYI034
-        """Return the active run context."""
+    def __enter__(self) -> RunSession:  # noqa: PYI034
+        """Return the active run session."""
         return self
 
     def __exit__(
@@ -110,12 +110,12 @@ class Run:
                 media_batches.append((key, [value]))
             elif isinstance(value, (list, tuple)):
                 if not value or not all(isinstance(v, (Html, Image, Video, Audio)) for v in value):
-                    raise TypeError(f"Lists passed to underfit.Run.log must contain only media objects: {key}")
+                    raise TypeError(f"Lists passed to underfit.RunSession.log must contain only media objects: {key}")
                 if any(type(v) is not type(value[0]) for v in value[1:]):
-                    raise TypeError(f"Lists passed to underfit.Run.log must contain only one media type: {key}")
+                    raise TypeError(f"Lists passed to underfit.RunSession.log must contain only one media type: {key}")
                 media_batches.append((key, list(value)))
             else:
-                raise TypeError(f"Unsupported value for underfit.Run.log: {key}")
+                raise TypeError(f"Unsupported value for underfit.RunSession.log: {key}")
 
         if scalar_values:
             self._buffer_scalars(scalar_values, step)

@@ -37,7 +37,7 @@ def _ctx() -> AppContext:
 
 
 def _reset_sdk_state() -> None:
-    underfit.run = None
+    underfit.session = None
     underfit._capture_context = None  # noqa: SLF001
 
 
@@ -46,7 +46,7 @@ def reset_sdk() -> Iterator[None]:
     """Ensure the global SDK run handle is cleared even when a test fails mid-run."""
     _reset_sdk_state()
     yield
-    if underfit.run is not None:
+    if underfit.session is not None:
         try:
             underfit.finish()
         except Exception:

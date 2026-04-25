@@ -11,7 +11,7 @@ from pytest_mock import MockerFixture
 
 import underfit
 from underfit.clients.local import LocalClient
-from underfit.run import Run
+from underfit.run import RunSession
 
 
 def test_init_captures_terminal_output(tmp_path: Path) -> None:
@@ -34,11 +34,11 @@ def test_init_supports_context_manager(
     tmp_path: Path, mocker: MockerFixture, error: type[BaseException] | None, state: str,
 ) -> None:
     """Finish the active run when exiting a context."""
-    spy = mocker.spy(Run, "finish")
+    spy = mocker.spy(RunSession, "finish")
 
     def exercise() -> None:
         with underfit.init("project", log_dir=tmp_path) as run:
-            assert underfit.run is run
+            assert underfit.session is run
             if error is not None:
                 raise error()
 
@@ -47,7 +47,7 @@ def test_init_supports_context_manager(
     else:
         with pytest.raises(error):
             exercise()
-    assert underfit.run is None
+    assert underfit.session is None
     spy.assert_called_once()
     assert spy.call_args.args[1] == state
 
