@@ -23,7 +23,7 @@ artifact_module = importlib.import_module("underfit.artifact")
 class _RecordingClient(Client):
     def __init__(self) -> None:
         self.project = Project(handle="acct", name="project", client=self)
-        self.run_name = "test-run"
+        self.run = Run(project=self.project, id="test-run", name="test-run")
         self.scalar_calls: list[tuple[dict[str, float], int | None]] = []
         self.media_calls: list[tuple[str, int | None, Sequence[Media]]] = []
         self.artifact_calls: list[Artifact] = []
@@ -38,7 +38,8 @@ class _RecordingClient(Client):
     def log_media(self, key: str, step: int | None, media: Sequence[Media]) -> None:
         self.media_calls.append((key, step, media))
 
-    def log_artifact(self, artifact: Artifact) -> Future[None]:
+    def log_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
+        _ = run
         if not isinstance(artifact, Artifact):
             raise TypeError("artifact must be an underfit.Artifact")
         self.artifact_calls.append(artifact)
@@ -48,11 +49,7 @@ class _RecordingClient(Client):
 
     def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
         _ = project
-        return self.log_artifact(artifact)
-
-    def log_run_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
-        _ = run
-        return self.log_artifact(artifact)
+        return self.log_artifact(self.run, artifact)
 
     def list_runs(self, project: Project) -> list[Run]:
         _ = project

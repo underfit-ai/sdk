@@ -40,8 +40,6 @@ class ArtifactDataUpload:
     data: bytes
 
 
-
-
 @dataclass(frozen=True)
 class ArtifactReference:
     """Represent an external artifact reference."""

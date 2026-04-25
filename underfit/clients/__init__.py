@@ -23,7 +23,7 @@ class Client(Protocol):
     """Define the storage client contract used by ``underfit.Run``."""
 
     project: Project
-    run_name: str
+    run: Run
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
         """Append scalar metric values for a run."""
@@ -34,14 +34,11 @@ class Client(Protocol):
     def log_media(self, key: str, step: int | None, media: Sequence[Media]) -> None:
         """Append media files for a run under a shared key and step."""
 
-    def log_artifact(self, artifact: Artifact) -> Future[None]:
-        """Store an artifact for the active run."""
+    def log_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
+        """Store an artifact under a run."""
 
     def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
         """Store an artifact directly under a project."""
-
-    def log_run_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
-        """Store an artifact under a previously created run."""
 
     def list_runs(self, project: Project) -> list[Run]:
         """Return the runs stored under a project."""

@@ -112,7 +112,7 @@ def init(
         )
         client = remote
 
-    session = RunSession(project=client.project, name=client.run_name, config=resolved_config, on_finish=finish)
+    session = RunSession(project=client.project, name=client.run.name, config=resolved_config, on_finish=finish)
     _capture_context = _capture_output(client)
     _capture_context.__enter__()
     return session

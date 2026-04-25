@@ -28,7 +28,7 @@ def _run_from_payload(project: Project, payload: dict[str, Any]) -> Run:
     return Run(
         project=project, id=payload["id"], name=payload["name"],
         config=payload.get("config") or {}, summary=payload.get("summary") or {},
-        terminal_state=payload.get("terminalState"), created_at=payload.get("createdAt"),
+        terminal_state=payload.get("terminalState"),
     )
 
 
@@ -86,8 +86,10 @@ class RemoteClient:
         body: dict[str, Any] = {"runName": run_name, "launchId": launch_id, "workerLabel": worker_label}
         if run_config:
             body["config"] = run_config
+        from underfit.run import Run  # noqa: PLC0415
         resp = self._request("POST", f"{self._runs_url}/launch", body, auth="api_key")
-        self.run_name = resp["name"]
+        run_id = resp.get("id") or resp["name"]
+        self.run = Run(project=self.project, id=run_id, name=resp["name"], config=dict(run_config))
         self._worker_token = resp["workerToken"]
         self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
         self._flush_thread.start()
@@ -136,19 +138,15 @@ class RemoteClient:
         with urllib.request.urlopen(req) as resp:
             resp.read()
 
-    def log_artifact(self, artifact: Artifact) -> Future[None]:
-        """Store an artifact for the active run."""
-        return self._upload_pool.submit(self._upload_artifact, f"{self._runs_url}/{self.run_name}/artifacts", artifact)
+    def log_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
+        """Store an artifact under a run."""
+        base = f"{self._api_url}/accounts/{run.project.handle}/projects/{run.project.name}"
+        return self._upload_pool.submit(self._upload_artifact, f"{base}/runs/{run.name}/artifacts", artifact)
 
     def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
         """Store an artifact directly under a project."""
         url = f"{self._api_url}/accounts/{project.handle}/projects/{project.name}/artifacts"
         return self._upload_pool.submit(self._upload_artifact, url, artifact)
-
-    def log_run_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
-        """Store an artifact under a previously created run."""
-        base = f"{self._api_url}/accounts/{run.project.handle}/projects/{run.project.name}"
-        return self._upload_pool.submit(self._upload_artifact, f"{base}/runs/{run.name}/artifacts", artifact)
 
     def list_runs(self, project: Project) -> list[Run]:
         """Return the runs stored under a project."""

@@ -41,9 +41,10 @@ class LocalClient:
 
     def launch_run(self, *, run_name: str, run_config: dict[str, Any], worker_label: str) -> None:
         """Create a fresh run directory and start the metrics sampler."""
-        self.run_name = run_name
+        from underfit.run import Run  # noqa: PLC0415
         self._worker_label = worker_label
-        self.run_dir = self._root_dir / str(uuid4())
+        self.run = Run(project=self.project, id=str(uuid4()), name=run_name, config=dict(run_config))
+        self.run_dir = self._root_dir / self.run.id
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self._run_meta: dict[str, Any] = {
             "project": self.project.name, "name": run_name, "config": run_config, "summary": {},
@@ -90,17 +91,13 @@ class LocalClient:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(payload.data)
 
-    def log_artifact(self, artifact: Artifact) -> Future[None]:
-        """Store an artifact for the active run."""
-        return self._write_artifact(self.run_dir / "artifacts", artifact)
+    def log_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
+        """Store an artifact under a run."""
+        return self._write_artifact(self._root_dir / run.id / "artifacts", artifact)
 
     def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
         """Store an artifact directly under a project."""
         return self._write_artifact(self._root_dir / "projects" / project.name / "artifacts", artifact)
-
-    def log_run_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
-        """Store an artifact under a previously created run."""
-        return self._write_artifact(self._root_dir / run.id / "artifacts", artifact)
 
     def list_runs(self, project: Project) -> list[Run]:
         """Return the runs stored under a project."""

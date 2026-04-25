@@ -20,7 +20,7 @@ def test_local_client_writes_backfill_layout(tmp_path: Path) -> None:
 
     artifact = Artifact("dataset-v1", "dataset", metadata={"format": "json"})
     artifact.add_bytes(b"{}", name="payload.json")
-    client.log_artifact(artifact)
+    client.log_artifact(client.run, artifact)
 
     client.log_media("samples", 7, [Html("<h1>ok</h1>", caption="summary")])
     client.finish()
@@ -60,7 +60,7 @@ def test_local_client_reads_back_runs_and_artifacts(tmp_path: Path) -> None:
     writer.log_scalars({"loss": 0.4}, step=1)
     run_artifact = Artifact("ckpt", "model")
     run_artifact.add_bytes(b"weights", name="model.bin")
-    writer.log_artifact(run_artifact).result()
+    writer.log_artifact(writer.run, run_artifact).result()
     project_artifact = Artifact("eval-set", "dataset")
     project_artifact.add_bytes(b'{"x": 1}', name="payload.json")
     writer.log_project_artifact(writer.project, project_artifact).result()

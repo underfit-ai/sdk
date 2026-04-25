@@ -27,7 +27,6 @@ class Run:
     config: dict[str, Any] = field(default_factory=dict)
     summary: dict[str, float] = field(default_factory=dict)
     terminal_state: str | None = None
-    created_at: str | None = None
 
     def list_artifacts(self) -> list[Artifact]:
         """Return artifacts attached to this run."""
@@ -35,7 +34,7 @@ class Run:
 
     def log_artifact(self, artifact: Artifact) -> Future[None]:
         """Append an artifact to this run."""
-        return self.project.client.log_run_artifact(self, artifact)
+        return self.project.client.log_artifact(self, artifact)
 
 PathLike = Union[str, Path]
 PathOrBytes = Union[str, Path, bytes, bytearray, memoryview]
@@ -243,7 +242,7 @@ class RunSession:
         self._require_active()
         if not isinstance(artifact, Artifact):
             raise TypeError("artifact must be an underfit.Artifact")
-        return self.client.log_artifact(artifact)
+        return self.client.log_artifact(self.client.run, artifact)
 
     def finish(self, terminal_state: TerminalState = "finished") -> None:
         """Finalize the run."""
