@@ -9,7 +9,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Callable, Union
 
-from underfit.artifact import Artifact
+from underfit.artifact import Artifact, StoredArtifact
 from underfit.media import Audio, Html, Image, Video
 from underfit.project import Project
 
@@ -28,7 +28,7 @@ class Run:
     summary: dict[str, float] = field(default_factory=dict)
     terminal_state: str | None = None
 
-    def list_artifacts(self) -> list[Artifact]:
+    def list_artifacts(self) -> list[StoredArtifact]:
         """Return artifacts attached to this run."""
         return self.project.client.list_artifacts(self.project, self)
 

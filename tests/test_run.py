@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
+from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload, StoredArtifact
 from underfit.clients import Client
 from underfit.media import Html, Image, Media
 from underfit.project import Project
@@ -59,7 +59,7 @@ class _RecordingClient(Client):
         _ = project, name
         raise FileNotFoundError(name)
 
-    def list_artifacts(self, project: Project, run: Run | None = None) -> list[Artifact]:
+    def list_artifacts(self, project: Project, run: Run | None = None) -> list[StoredArtifact]:
         _ = project, run
         return []
 

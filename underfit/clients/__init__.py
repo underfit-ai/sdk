@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
-from underfit.artifact import Artifact
+from underfit.artifact import Artifact, StoredArtifact
 from underfit.clients.local import LocalClient
 from underfit.clients.remote import RemoteClient
 from underfit.media import Media
@@ -46,7 +46,7 @@ class Client(Protocol):
     def get_run(self, project: Project, name: str) -> Run:
         """Return a single run by name."""
 
-    def list_artifacts(self, project: Project, run: Run | None = None) -> list[Artifact]:
+    def list_artifacts(self, project: Project, run: Run | None = None) -> list[StoredArtifact]:
         """Return project-scoped artifacts, or run-scoped artifacts when ``run`` is given."""
 
     def finish(self, terminal_state: TerminalState = "finished") -> None:

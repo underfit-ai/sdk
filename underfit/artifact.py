@@ -57,6 +57,29 @@ class ArtifactManifest:
     references: list[ArtifactReference]
 
 
+@dataclass
+class StoredArtifact:
+    """Reference to an artifact already stored by Underfit."""
+    name: str
+    type: str
+    metadata: dict[str, Any]
+    step: int | None
+    files: list[str]
+    reader: Callable[[str], bytes]
+
+    def read(self, file_path: str) -> bytes:
+        """Return the raw bytes of a single file."""
+        return self.reader(file_path)
+
+    def download(self, dest: PathLike) -> None:
+        """Write every file in this artifact under ``dest``."""
+        root = Path(dest)
+        for path in self.files:
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(self.reader(path))
+
+
 ArtifactUpload = Union[ArtifactPathUpload, ArtifactDataUpload]
 
 
@@ -109,40 +132,6 @@ class Artifact:
         self._references: list[ArtifactReference] = []
         self._used_paths: set[str] = set()
         self._next_media_index = 1
-        self._stored_files: list[str] | None = None
-        self._reader: Callable[[str], bytes] | None = None
-
-    @classmethod
-    def from_stored(
-        cls, *, name: str, type: str, metadata: dict[str, Any] | None, step: int | None,  # noqa: A002
-        files: list[str], reader: Callable[[str], bytes],
-    ) -> Artifact:
-        """Build an artifact from stored data — populated by client read paths."""
-        artifact = cls(name=name, type=type, metadata=metadata, step=step)
-        artifact._stored_files = files
-        artifact._reader = reader
-        return artifact
-
-    @property
-    def files(self) -> list[str]:
-        """Return the list of file paths in this artifact."""
-        if self._stored_files is not None:
-            return list(self._stored_files)
-        return [u.path for u in self._upload_files]
-
-    def read(self, file_path: str) -> bytes:
-        """Return the raw bytes of a single file from a stored artifact."""
-        if self._reader is None:
-            raise RuntimeError("read is only available on artifacts fetched from a project")
-        return self._reader(file_path)
-
-    def download(self, dest: PathLike) -> None:
-        """Write every file in a stored artifact under ``dest``."""
-        root = Path(dest)
-        for path in self.files:
-            target = root / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(self.read(path))
 
     @classmethod
     def from_code(

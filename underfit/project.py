@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from underfit.artifact import Artifact
+    from underfit.artifact import Artifact, StoredArtifact
     from underfit.clients import Client
     from underfit.run import Run
 
@@ -37,6 +37,6 @@ class Project:
         """Return a single run by name."""
         return self.client.get_run(self, name)
 
-    def list_artifacts(self) -> list[Artifact]:
+    def list_artifacts(self) -> list[StoredArtifact]:
         """Return artifacts attached directly to this project (not to any run)."""
         return self.client.list_artifacts(self)

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
+from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload, StoredArtifact
 from underfit.lib.metrics import SystemMetrics
 from underfit.media import Html, Media
 from underfit.project import Project
@@ -110,7 +110,7 @@ class LocalClient:
                 return run
         raise FileNotFoundError(f"run {name!r} not found in project {project.name!r}")
 
-    def list_artifacts(self, project: Project, run: Run | None = None) -> list[Artifact]:
+    def list_artifacts(self, project: Project, run: Run | None = None) -> list[StoredArtifact]:
         """Return project-scoped artifacts, or run-scoped artifacts when ``run`` is given."""
         if run is None:
             return self._read_artifacts(self._root_dir / "projects" / project.name / "artifacts")
@@ -136,10 +136,10 @@ class LocalClient:
                 terminal_state=meta.get("terminal_state"),
             )
 
-    def _read_artifacts(self, parent: Path) -> list[Artifact]:
+    def _read_artifacts(self, parent: Path) -> list[StoredArtifact]:
         if not parent.is_dir():
             return []
-        result: list[Artifact] = []
+        result: list[StoredArtifact] = []
         for entry in sorted(parent.iterdir()):
             info_path, manifest_path = entry / "artifact.json", entry / "manifest.json"
             if not entry.is_dir() or not info_path.is_file() or not manifest_path.is_file():
@@ -147,9 +147,9 @@ class LocalClient:
             info = json.loads(info_path.read_text())
             manifest = json.loads(manifest_path.read_text())
             files_dir = entry / "files"
-            result.append(Artifact.from_stored(
+            result.append(StoredArtifact(
                 name=info["name"], type=info["type"],
-                metadata=info.get("metadata"), step=info.get("step"),
+                metadata=info.get("metadata") or {}, step=info.get("step"),
                 files=list(manifest.get("files") or []),
                 reader=lambda path, _dir=files_dir: (_dir / path).read_bytes(),
             ))
