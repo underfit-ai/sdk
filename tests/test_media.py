@@ -37,18 +37,10 @@ def test_media_rejects_invalid_bytes_inputs(factory: Callable[[], object], messa
         factory()
 
 
-@pytest.mark.parametrize("cls", [Audio, Image, Video])
+@pytest.mark.parametrize("cls", [Audio, Image, Video, Html])
 def test_media_rejects_wrong_file_types(tmp_path: Path, cls: type[object]) -> None:
-    """Reject non-media files for path-based inputs."""
+    """Reject non-matching files for path-based inputs."""
     path = tmp_path / "sample.txt"
     path.write_text("not media")
     with pytest.raises(ValueError, match="path must be"):
         cls(path)
-
-
-def test_html_rejects_non_html_paths(tmp_path: Path) -> None:
-    """Reject non-HTML files for path-based HTML inputs."""
-    path = tmp_path / "report.txt"
-    path.write_text("not html")
-    with pytest.raises(ValueError, match="path must be an HTML file"):
-        Html(path)

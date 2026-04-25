@@ -86,22 +86,15 @@ def test_artifact_from_code_respects_include_and_exclude_filters(tmp_path: Path)
     assert Path(uploads[0].source_path).read_bytes() == b"print('keep')\n"
 
 
-def test_artifact_rejects_invalid_and_conflicting_paths() -> None:
-    """Reject artifact paths that the API would not accept."""
+def test_artifact_rejects_invalid_inputs() -> None:
+    """Reject artifact paths and URLs that the API would not accept."""
     artifact = Artifact("report", "report")
     artifact.add_bytes(b"a", name="dir/file.txt")
 
     with pytest.raises(ValueError, match="valid relative path"):
         artifact.add_bytes(b"b", name="/bad.txt")
-
     with pytest.raises(ValueError, match="already exists"):
         artifact.add_bytes(b"c", name="dir")
-
-
-def test_artifact_rejects_file_urls_with_authorities() -> None:
-    """Reject file URLs that include an authority component."""
-    artifact = Artifact("report", "report")
-
     with pytest.raises(ValueError, match="must not include an authority"):
         artifact.add_url("file://localhost/tmp/report.txt")
 
