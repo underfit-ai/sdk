@@ -17,6 +17,7 @@ from uuid import uuid4
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.lib.metrics import SystemMetrics
 from underfit.media import Media
+from underfit.project import Project
 
 
 def _multipart_body(metadata: dict[str, Any], files: list[tuple[bytes, str]]) -> tuple[bytes, str]:
@@ -63,8 +64,9 @@ class RemoteClient:
         if "/" not in project:
             user = self._request("GET", f"{self._api_url}/me", auth="api_key")
             project = f"{user['handle']}/{project}"
-        self._handle, self._project_name = project.split("/", 1)
-        self._runs_url = f"{self._api_url}/accounts/{self._handle}/projects/{self._project_name}/runs"
+        handle, project_name = project.split("/", 1)
+        self.project = Project(handle=handle, name=project_name, client=self)
+        self._runs_url = f"{self._api_url}/accounts/{handle}/projects/{project_name}/runs"
         self._log_buffer: list[dict[str, Any]] = []
         self._scalar_buffer: list[dict[str, Any]] = []
         self._next_log_line = 0

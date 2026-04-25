@@ -16,6 +16,7 @@ from uuid import uuid4
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.lib.metrics import SystemMetrics
 from underfit.media import Html, Media
+from underfit.project import Project
 
 
 class LocalClient:
@@ -43,6 +44,8 @@ class LocalClient:
         """
         self.run_name = run_name
         self._worker_label = worker_label
+        handle, name = project_name.split("/", 1) if "/" in project_name else ("local", project_name)
+        self.project = Project(handle=handle, name=name, client=self)
         self.run_dir = Path(root_dir or Path.cwd() / "underfit") / str(uuid4())
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self._run_meta: dict[str, Any] = {

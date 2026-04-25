@@ -10,6 +10,7 @@ from underfit.artifact import Artifact
 from underfit.clients.local import LocalClient
 from underfit.clients.remote import RemoteClient
 from underfit.media import Media
+from underfit.project import Project
 
 TerminalState = Literal["finished", "failed", "cancelled"]
 
@@ -18,6 +19,7 @@ TerminalState = Literal["finished", "failed", "cancelled"]
 class Client(Protocol):
     """Define the storage client contract used by ``underfit.Run``."""
 
+    project: Project
     run_name: str
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:

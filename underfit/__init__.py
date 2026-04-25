@@ -17,10 +17,11 @@ from underfit.artifact import Artifact
 from underfit.clients import Client, LocalClient, RemoteClient, TerminalState
 from underfit.lib.terminal import capture
 from underfit.media import Audio, Html, Image, Video
+from underfit.project import Project
 from underfit.run import PathFilter, PathLike, PathOrBytes, RunSession
 
 __all__ = [
-    "Artifact", "Audio", "Html", "Image", "RunSession", "Video",
+    "Artifact", "Audio", "Html", "Image", "Project", "RunSession", "Video",
     "finish", "init", "log", "log_git", "log_model", "session",
 ]
 
@@ -117,7 +118,7 @@ def init(
             worker_label=resolved_worker_label,
         )
 
-    session = RunSession(project=project, name=client.run_name, client=client, config=resolved_config, on_finish=finish)
+    session = RunSession(project=client.project, name=client.run_name, config=resolved_config, on_finish=finish)
     _capture_context = _capture_output(client)
     _capture_context.__enter__()
     return session

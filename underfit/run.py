@@ -11,6 +11,7 @@ from typing import Any, Callable, Union
 from underfit.artifact import Artifact
 from underfit.clients import Client, TerminalState
 from underfit.media import Audio, Html, Image, Video
+from underfit.project import Project
 
 PathLike = Union[str, Path]
 PathOrBytes = Union[str, Path, bytes, bytearray, memoryview]
@@ -22,30 +23,32 @@ class RunSession:
 
     def __init__(
         self,
-        project: str,
+        project: Project,
         name: str,
-        client: Client,
         config: dict[str, Any] | None = None,
         on_finish: Callable[[TerminalState], None] | None = None,
     ) -> None:
         """Initialize a run session.
 
         Args:
-            project: Project name.
+            project: Project the run belongs to.
             name: Run name.
-            client: Storage client used for run data.
             config: Run configuration dictionary.
             on_finish: Optional callback used when exiting a context.
         """
         self.project = project
         self.name = name
-        self.client = client
         self.config = {} if config is None else dict(config)
         self._finished = False
         self._on_finish = on_finish
         self._scalar_lock = threading.Lock()
         self._pending_step: int | None = None
         self._pending_values: dict[str, float] = {}
+
+    @property
+    def client(self) -> Client:
+        """Return the storage client used to persist this run."""
+        return self.project.client
 
     def _require_active(self) -> None:
         if self._finished:

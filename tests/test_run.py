@@ -7,12 +7,14 @@ import subprocess
 from collections.abc import Sequence
 from concurrent.futures import Future
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
 from underfit.clients import Client
 from underfit.media import Html, Image, Media
+from underfit.project import Project
 from underfit.run import RunSession
 
 artifact_module = importlib.import_module("underfit.artifact")
@@ -20,14 +22,12 @@ artifact_module = importlib.import_module("underfit.artifact")
 
 class _RecordingClient(Client):
     def __init__(self) -> None:
+        self.project = Project(handle="acct", name="project", client=self)
+        self.run_name = "test-run"
         self.scalar_calls: list[tuple[dict[str, float], int | None]] = []
         self.media_calls: list[tuple[str, int | None, Sequence[Media]]] = []
         self.artifact_calls: list[Artifact] = []
         self.finish_calls: list[str] = []
-
-    @property
-    def run_name(self) -> str:
-        return "test-run"
 
     def log_scalars(self, values: dict[str, float], step: int | None) -> None:
         self.scalar_calls.append((values, step))
@@ -50,10 +50,14 @@ class _RecordingClient(Client):
         self.finish_calls.append(terminal_state)
 
 
+def _make_session(client: Client, config: dict[str, Any] | None = None) -> RunSession:
+    return RunSession(client.project, "run", config)
+
+
 def test_run_copies_config_on_init() -> None:
     """Copy config input so the run keeps its own snapshot."""
     config = {"lr": 0.1}
-    run = RunSession("project", "run", _RecordingClient(), config)
+    run = _make_session(_RecordingClient(), config)
     config["lr"] = 0.2
     assert run.config == {"lr": 0.1}
 
@@ -61,7 +65,7 @@ def test_run_copies_config_on_init() -> None:
 def test_log_records_scalars_and_media() -> None:
     """Flatten nested data and send supported payloads to the client."""
     client = _RecordingClient()
-    run = RunSession("project", "run", client)
+    run = _make_session(client)
 
     run.log({
         "train": {"loss": 1, "done": True},
@@ -80,7 +84,7 @@ def test_log_records_scalars_and_media() -> None:
 def test_log_rejects_unsupported_values() -> None:
     """Reject unsupported values instead of silently dropping them."""
     client = _RecordingClient()
-    run = RunSession("project", "run", client)
+    run = _make_session(client)
 
     with pytest.raises(TypeError, match="must contain only media objects: train/tags"):
         run.log({"train": {"loss": 1.0, "tags": ["baseline"]}})
@@ -91,7 +95,7 @@ def test_log_rejects_unsupported_values() -> None:
 
 def test_log_rejects_mixed_media_lists() -> None:
     """Reject media batches with inconsistent types."""
-    run = RunSession("project", "run", _RecordingClient())
+    run = _make_session(_RecordingClient())
     with pytest.raises(TypeError, match="only one media type: samples"):
         run.log({"samples": [Html("<p>a</p>"), Image(b"img", file_type="png")]})
 
@@ -99,7 +103,7 @@ def test_log_rejects_mixed_media_lists() -> None:
 def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
     """Apply include and exclude callbacks to resolved paths."""
     client = _RecordingClient()
-    run = RunSession("project", "run", client)
+    run = _make_session(client)
     root = tmp_path / "src"
     root.mkdir()
     keep = root / "keep.py"
@@ -125,7 +129,7 @@ def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
 def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Capture git metadata on the artifact and upload the working tree patch."""
     client = _RecordingClient()
-    run = RunSession("project", "run", client)
+    run = _make_session(client)
     repo_root = tmp_path.resolve()
     tracked_patch = b"diff --git a/app.py b/app.py\n"
     status_output = "# branch.oid abc123\n# branch.head main\n? new.py"
@@ -165,7 +169,7 @@ def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: p
 def test_log_model_logs_bytes_checkpoint() -> None:
     """Upload bytes checkpoints as a model artifact."""
     client = _RecordingClient()
-    run = RunSession("project", "run", client)
+    run = _make_session(client)
 
     run.log_model(b"weights").result()
     artifact = client.artifact_calls[0]
@@ -182,7 +186,7 @@ def test_log_model_logs_bytes_checkpoint() -> None:
 def test_finish_is_idempotent_and_blocks_future_writes() -> None:
     """Allow repeated finish calls but reject later write operations."""
     client = _RecordingClient()
-    run = RunSession("project", "run", client)
+    run = _make_session(client)
 
     run.finish()
     run.finish()
