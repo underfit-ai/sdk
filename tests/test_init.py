@@ -10,20 +10,20 @@ import pytest
 from pytest_mock import MockerFixture
 
 import underfit
-from underfit.backends.local import LocalBackend
+from underfit.clients.local import LocalClient
 from underfit.run import Run
 
 
 def test_init_captures_terminal_output(tmp_path: Path) -> None:
-    """Capture stdout and stderr into backend logs."""
+    """Capture stdout and stderr into client logs."""
     run = underfit.init("project", log_dir=tmp_path, worker_label="worker-0")
     assert re.match(r"^[a-z]+-[a-z]+$", run.name)
     sys.stdout.write("hello")
     sys.stdout.write(" world\n")
     sys.stderr.write("oops")
     underfit.finish()
-    assert isinstance(run.backend, LocalBackend)
-    assert (run.backend.run_dir / "logs" / "worker-0" / "segments" / "0.log").read_text() == "hello world\noops\n"
+    assert isinstance(run.client, LocalClient)
+    assert (run.client.run_dir / "logs" / "worker-0" / "segments" / "0.log").read_text() == "hello world\noops\n"
 
 
 @pytest.mark.parametrize(
@@ -63,7 +63,7 @@ def test_init_uses_env_log_dir_and_reuses_active_run(tmp_path: Path, monkeypatch
     """Honor UNDERFIT_LOG_DIR and return the existing run on repeated init calls."""
     monkeypatch.setenv("UNDERFIT_LOG_DIR", str(tmp_path))
     run = underfit.init("project", worker_label="worker-0")
-    assert isinstance(run.backend, LocalBackend)
-    assert run.backend.run_dir.parent == tmp_path.resolve()
+    assert isinstance(run.client, LocalClient)
+    assert run.client.run_dir.parent == tmp_path.resolve()
     assert underfit.init("other-project", worker_label="worker-1") is run
     underfit.finish()

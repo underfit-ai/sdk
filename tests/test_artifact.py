@@ -21,7 +21,7 @@ from underfit.media import Audio, Html, Image, Video
 
 
 def test_artifact_collects_uploads_and_manifest(tmp_path: Path) -> None:
-    """Collect artifact data before backend serialization."""
+    """Collect artifact data before client serialization."""
     metrics = tmp_path / "metrics.json"
     metrics.write_text('{"loss": 0.1}\n')
     model_card = tmp_path / "model-card.txt"

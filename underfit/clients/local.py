@@ -1,4 +1,4 @@
-"""Local filesystem backend for offline Underfit runs."""
+"""Local filesystem client for offline Underfit runs."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from underfit.lib.metrics import SystemMetrics
 from underfit.media import Html, Media
 
 
-class LocalBackend:
+class LocalClient:
     """Persist run data in local files for offline usage."""
 
     _RAW_SCALAR_RESOLUTION = 1
@@ -32,7 +32,7 @@ class LocalBackend:
         worker_label: str,
         root_dir: str | Path | None = None,
     ) -> None:
-        """Initialize a local filesystem backend.
+        """Initialize a local filesystem client.
 
         Args:
             project_name: Project name for the run.
@@ -128,7 +128,7 @@ class LocalBackend:
                 self.log_scalars(metrics, step=None)
 
     def finish(self, terminal_state: str = "finished") -> None:
-        """Finalize a run and flush backend state."""
+        """Finalize a run and flush client state."""
         self._stop.set()
         if hasattr(self, "_metrics_thread"):
             self._metrics_thread.join()

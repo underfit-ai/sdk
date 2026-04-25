@@ -11,14 +11,14 @@ from pathlib import Path
 import pytest
 
 from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload
-from underfit.backends import Backend
+from underfit.clients import Client
 from underfit.media import Html, Image, Media
 from underfit.run import Run
 
 artifact_module = importlib.import_module("underfit.artifact")
 
 
-class _RecordingBackend(Backend):
+class _RecordingClient(Client):
     def __init__(self) -> None:
         self.scalar_calls: list[tuple[dict[str, float], int | None]] = []
         self.media_calls: list[tuple[str, int | None, Sequence[Media]]] = []
@@ -53,15 +53,15 @@ class _RecordingBackend(Backend):
 def test_run_copies_config_on_init() -> None:
     """Copy config input so the run keeps its own snapshot."""
     config = {"lr": 0.1}
-    run = Run("project", "run", _RecordingBackend(), config)
+    run = Run("project", "run", _RecordingClient(), config)
     config["lr"] = 0.2
     assert run.config == {"lr": 0.1}
 
 
 def test_log_records_scalars_and_media() -> None:
-    """Flatten nested data and send supported payloads to the backend."""
-    backend = _RecordingBackend()
-    run = Run("project", "run", backend)
+    """Flatten nested data and send supported payloads to the client."""
+    client = _RecordingClient()
+    run = Run("project", "run", client)
 
     run.log({
         "train": {"loss": 1, "done": True},
@@ -70,36 +70,36 @@ def test_log_records_scalars_and_media() -> None:
     }, step=3)
     run.finish()
 
-    assert backend.scalar_calls == [({"train/loss": 1.0, "train/done": 1.0}, 3)]
-    assert len(backend.media_calls) == 2
-    assert backend.media_calls[0][0:2] == ("report", 3)
-    assert backend.media_calls[1][0:2] == ("samples/gallery", 3)
-    assert all(isinstance(m, Html) for m in backend.media_calls[1][2])
+    assert client.scalar_calls == [({"train/loss": 1.0, "train/done": 1.0}, 3)]
+    assert len(client.media_calls) == 2
+    assert client.media_calls[0][0:2] == ("report", 3)
+    assert client.media_calls[1][0:2] == ("samples/gallery", 3)
+    assert all(isinstance(m, Html) for m in client.media_calls[1][2])
 
 
 def test_log_rejects_unsupported_values() -> None:
     """Reject unsupported values instead of silently dropping them."""
-    backend = _RecordingBackend()
-    run = Run("project", "run", backend)
+    client = _RecordingClient()
+    run = Run("project", "run", client)
 
     with pytest.raises(TypeError, match="Lists passed to underfit.Run.log must contain only media objects: train/tags"):
         run.log({"train": {"loss": 1.0, "tags": ["baseline"]}})
 
-    assert backend.scalar_calls == []
-    assert backend.media_calls == []
+    assert client.scalar_calls == []
+    assert client.media_calls == []
 
 
 def test_log_rejects_mixed_media_lists() -> None:
     """Reject media batches with inconsistent types."""
-    run = Run("project", "run", _RecordingBackend())
+    run = Run("project", "run", _RecordingClient())
     with pytest.raises(TypeError, match="only one media type: samples"):
         run.log({"samples": [Html("<p>a</p>"), Image(b"img", file_type="png")]})
 
 
 def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
     """Apply include and exclude callbacks to resolved paths."""
-    backend = _RecordingBackend()
-    run = Run("project", "run", backend)
+    client = _RecordingClient()
+    run = Run("project", "run", client)
     root = tmp_path / "src"
     root.mkdir()
     keep = root / "keep.py"
@@ -114,8 +114,8 @@ def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
         include=lambda path: path.suffix == ".py",
         exclude=lambda path: path.name == "skip.py",
     ).result()
-    assert [logged.name for logged in backend.artifact_calls] == ["source-code"]
-    uploads = backend.artifact_calls[0].uploads()
+    assert [logged.name for logged in client.artifact_calls] == ["source-code"]
+    uploads = client.artifact_calls[0].uploads()
     assert len(uploads) == 1
     assert isinstance(uploads[0], ArtifactPathUpload)
     assert uploads[0].path == "keep.py"
@@ -124,8 +124,8 @@ def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
 
 def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Capture git metadata on the artifact and upload the working tree patch."""
-    backend = _RecordingBackend()
-    run = Run("project", "run", backend)
+    client = _RecordingClient()
+    run = Run("project", "run", client)
     repo_root = tmp_path.resolve()
     tracked_patch = b"diff --git a/app.py b/app.py\n"
     status_output = "# branch.oid abc123\n# branch.head main\n? new.py"
@@ -148,15 +148,15 @@ def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: p
     monkeypatch.setattr(artifact_module.subprocess, "run", fake_run)
 
     run.log_git(repo_root).result()
-    assert backend.artifact_calls[0].name == "git-state"
-    assert backend.artifact_calls[0].metadata == {
+    assert client.artifact_calls[0].name == "git-state"
+    assert client.artifact_calls[0].metadata == {
         "commit": "abc123",
         "branch": "main",
         "is_dirty": True,
         "untracked_files": ["new.py"],
     }
-    assert [logged.name for logged in backend.artifact_calls] == ["git-state"]
-    uploads = backend.artifact_calls[0].uploads()
+    assert [logged.name for logged in client.artifact_calls] == ["git-state"]
+    uploads = client.artifact_calls[0].uploads()
     assert isinstance(uploads[0], ArtifactDataUpload)
     assert uploads[0].path == "working-tree.patch"
     assert uploads[0].data == tracked_patch
@@ -164,14 +164,14 @@ def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: p
 
 def test_log_model_logs_bytes_checkpoint() -> None:
     """Upload bytes checkpoints as a model artifact."""
-    backend = _RecordingBackend()
-    run = Run("project", "run", backend)
+    client = _RecordingClient()
+    run = Run("project", "run", client)
 
     run.log_model(b"weights").result()
-    artifact = backend.artifact_calls[0]
+    artifact = client.artifact_calls[0]
     assert artifact.name == "model-checkpoint"
     assert artifact.type == "model"
-    assert len(backend.artifact_calls) == 1
+    assert len(client.artifact_calls) == 1
     assert len(artifact.uploads()) == 1
     upload = artifact.uploads()[0]
     assert isinstance(upload, ArtifactDataUpload)
@@ -181,13 +181,13 @@ def test_log_model_logs_bytes_checkpoint() -> None:
 
 def test_finish_is_idempotent_and_blocks_future_writes() -> None:
     """Allow repeated finish calls but reject later write operations."""
-    backend = _RecordingBackend()
-    run = Run("project", "run", backend)
+    client = _RecordingClient()
+    run = Run("project", "run", client)
 
     run.finish()
     run.finish()
 
-    assert backend.finish_calls == ["finished"]
+    assert client.finish_calls == ["finished"]
     with pytest.raises(RuntimeError, match="already finished"):
         run.log({"loss": 1.0})
     with pytest.raises(RuntimeError, match="already finished"):

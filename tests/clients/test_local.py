@@ -1,4 +1,4 @@
-"""Tests for the local backend."""
+"""Tests for the local client."""
 
 from __future__ import annotations
 
@@ -7,27 +7,27 @@ from pathlib import Path
 from uuid import UUID
 
 from underfit import Artifact, Html
-from underfit.backends.local import LocalBackend
+from underfit.clients.local import LocalClient
 
 
-def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
+def test_local_client_writes_backfill_layout(tmp_path: Path) -> None:
     """Write local run data in the layout consumed by the API backfill service."""
-    backend = LocalBackend(
+    client = LocalClient(
         project_name="Vision", run_name="Trial A", run_config={"lr": 0.01}, worker_label="worker-7", root_dir=tmp_path,
     )
 
-    backend.log_scalars({"loss": 0.8}, step=1)
-    backend.log_lines(["hello", "world\n"])
+    client.log_scalars({"loss": 0.8}, step=1)
+    client.log_lines(["hello", "world\n"])
 
     artifact = Artifact("dataset-v1", "dataset", metadata={"format": "json"})
     artifact.add_bytes(b"{}", name="payload.json")
-    backend.log_artifact(artifact)
+    client.log_artifact(artifact)
 
-    backend.log_media("samples", 7, [Html("<h1>ok</h1>", caption="summary")])
-    backend.finish()
+    client.log_media("samples", 7, [Html("<h1>ok</h1>", caption="summary")])
+    client.finish()
 
-    UUID(backend.run_dir.name)
-    metadata = json.loads((backend.run_dir / "run.json").read_text())
+    UUID(client.run_dir.name)
+    metadata = json.loads((client.run_dir / "run.json").read_text())
     assert metadata["project"] == "Vision"
     assert metadata["name"] == "Trial A"
     assert metadata["config"] == {"lr": 0.01}
@@ -35,13 +35,13 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     assert metadata["summary"] == {"loss": 0.8}
     assert set(metadata.keys()) == {"project", "name", "config", "terminal_state", "summary"}
 
-    scalar_path = backend.run_dir / "scalars" / "worker-7" / "r1" / "0.jsonl"
+    scalar_path = client.run_dir / "scalars" / "worker-7" / "r1" / "0.jsonl"
     scalar_lines = [json.loads(line) for line in scalar_path.read_text().splitlines()]
     assert scalar_lines == [{"step": 1, "values": {"loss": 0.8}, "timestamp": scalar_lines[0]["timestamp"]}]
 
-    assert (backend.run_dir / "logs" / "worker-7" / "segments" / "0.log").read_text() == "hello\nworld\n"
+    assert (client.run_dir / "logs" / "worker-7" / "segments" / "0.log").read_text() == "hello\nworld\n"
 
-    artifact_dirs = [p for p in (backend.run_dir / "artifacts").iterdir() if p.is_dir()]
+    artifact_dirs = [p for p in (client.run_dir / "artifacts").iterdir() if p.is_dir()]
     assert len(artifact_dirs) == 1
     artifact_dir = artifact_dirs[0]
     UUID(artifact_dir.name)
@@ -50,5 +50,5 @@ def test_local_backend_writes_backfill_layout(tmp_path: Path) -> None:
     assert json.loads((artifact_dir / "manifest.json").read_text()) == {"files": ["payload.json"], "references": []}
     assert (artifact_dir / "files" / "payload.json").read_bytes() == b"{}"
 
-    media_path = backend.run_dir / "media" / "html" / "samples_7_0.html"
+    media_path = client.run_dir / "media" / "html" / "samples_7_0.html"
     assert media_path.read_text() == "<h1>ok</h1>"

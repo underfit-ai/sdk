@@ -1,4 +1,4 @@
-"""Remote API backend for Underfit runs."""
+"""Remote API client for Underfit runs."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _multipart_body(metadata: dict[str, Any], files: list[tuple[bytes, str]]) ->
     buf.write(f"--{boundary}--\r\n".encode())
     return buf.getvalue(), f"multipart/form-data; boundary={boundary}"
 
-class RemoteBackend:
+class RemoteClient:
     """Push run data to a remote Underfit API server."""
 
     def __init__(
@@ -46,7 +46,7 @@ class RemoteBackend:
         run_config: dict[str, Any],
         worker_label: str,
     ) -> None:
-        """Initialize a remote backend.
+        """Initialize a remote client.
 
         Args:
             api_url: Base URL for the Underfit API.
@@ -136,7 +136,7 @@ class RemoteBackend:
         return self._upload_pool.submit(self._upload_artifact, artifact)
 
     def finish(self, terminal_state: str = "finished") -> None:
-        """Finalize a run and flush backend state."""
+        """Finalize a run and flush client state."""
         self._stop.set()
         self._flush_thread.join()
         if hasattr(self, "_metrics_thread"):

@@ -9,7 +9,7 @@ from types import TracebackType
 from typing import Any, Callable, Union
 
 from underfit.artifact import Artifact
-from underfit.backends import Backend, TerminalState
+from underfit.clients import Client, TerminalState
 from underfit.media import Audio, Html, Image, Video
 
 PathLike = Union[str, Path]
@@ -24,7 +24,7 @@ class Run:
         self,
         project: str,
         name: str,
-        backend: Backend,
+        client: Client,
         config: dict[str, Any] | None = None,
         on_finish: Callable[[TerminalState], None] | None = None,
     ) -> None:
@@ -33,13 +33,13 @@ class Run:
         Args:
             project: Project name.
             name: Run name.
-            backend: Backend used to store run data.
+            client: Storage client used for run data.
             config: Run configuration dictionary.
             on_finish: Optional callback used when exiting a context.
         """
         self.project = project
         self.name = name
-        self.backend = backend
+        self.client = client
         self.config = {} if config is None else dict(config)
         self._finished = False
         self._on_finish = on_finish
@@ -120,13 +120,13 @@ class Run:
         if scalar_values:
             self._buffer_scalars(scalar_values, step)
         for key, media_list in media_batches:
-            self.backend.log_media(key, step, media_list)
+            self.client.log_media(key, step, media_list)
 
     def _buffer_scalars(self, values: dict[str, float], step: int | None) -> None:
         with self._scalar_lock:
             if step is None:
                 self._flush_pending_locked()
-                self.backend.log_scalars(values, None)
+                self.client.log_scalars(values, None)
             elif self._pending_step is None or step == self._pending_step:
                 self._pending_step = step
                 self._pending_values.update(values)
@@ -137,7 +137,7 @@ class Run:
 
     def _flush_pending_locked(self) -> None:
         if self._pending_step is not None:
-            self.backend.log_scalars(self._pending_values, self._pending_step)
+            self.client.log_scalars(self._pending_values, self._pending_step)
             self._pending_step = None
             self._pending_values = {}
 
@@ -204,7 +204,7 @@ class Run:
         return self.log_artifact(artifact)
 
     def log_artifact(self, artifact: Artifact) -> Future[None]:
-        """Upload an artifact to the backend.
+        """Upload an artifact via the client.
 
         Args:
             artifact: Artifact to upload.
@@ -216,7 +216,7 @@ class Run:
         self._require_active()
         if not isinstance(artifact, Artifact):
             raise TypeError("artifact must be an underfit.Artifact")
-        return self.backend.log_artifact(artifact)
+        return self.client.log_artifact(artifact)
 
     def finish(self, terminal_state: TerminalState = "finished") -> None:
         """Finalize the run."""
@@ -224,5 +224,5 @@ class Run:
             return
         with self._scalar_lock:
             self._flush_pending_locked()
-        self.backend.finish(terminal_state)
+        self.client.finish(terminal_state)
         self._finished = True

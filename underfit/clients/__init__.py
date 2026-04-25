@@ -1,4 +1,4 @@
-"""Backend implementations for Underfit."""
+"""Client implementations for Underfit."""
 
 from __future__ import annotations
 
@@ -7,16 +7,16 @@ from concurrent.futures import Future
 from typing import Literal, Protocol, runtime_checkable
 
 from underfit.artifact import Artifact
-from underfit.backends.local import LocalBackend
-from underfit.backends.remote import RemoteBackend
+from underfit.clients.local import LocalClient
+from underfit.clients.remote import RemoteClient
 from underfit.media import Media
 
 TerminalState = Literal["finished", "failed", "cancelled"]
 
 
 @runtime_checkable
-class Backend(Protocol):
-    """Define the backend contract used by ``underfit.Run``."""
+class Client(Protocol):
+    """Define the storage client contract used by ``underfit.Run``."""
 
     run_name: str
 
@@ -33,7 +33,7 @@ class Backend(Protocol):
         """Store an artifact for a run."""
 
     def finish(self, terminal_state: TerminalState = "finished") -> None:
-        """Finalize a run and flush backend state."""
+        """Finalize a run and flush client state."""
 
 
-__all__ = ["Backend", "LocalBackend", "RemoteBackend", "TerminalState"]
+__all__ = ["Client", "LocalClient", "RemoteClient", "TerminalState"]

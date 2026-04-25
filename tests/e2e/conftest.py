@@ -72,7 +72,7 @@ def remote_env(api_tmp_path: Path, reset_sdk: None) -> Iterator[dict[str, Any]]:
             projects_repo.create(conn, user.id, project_name, "e2e", "private", {})
             api_key = api_keys_repo.create(conn, user.id, "e2e")
         os.environ["UNDERFIT_API_KEY"] = api_key.token
-        with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_make_urlopen_shim(client)):
+        with patch("underfit.clients.remote.urllib.request.urlopen", side_effect=_make_urlopen_shim(client)):
             yield {
                 "client": client, "handle": handle, "project": project_name, "api_key": api_key.token,
                 "local_file": local_file, "reference_file": reference_file,

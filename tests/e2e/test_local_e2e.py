@@ -1,4 +1,4 @@
-"""End-to-end test: SDK LocalBackend -> backfill -> API read endpoints."""
+"""End-to-end test: SDK LocalClient -> backfill -> API read endpoints."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ def _wait_for(client: Any, path: str, *, predicate: Any = None, timeout: float =
     raise AssertionError(f"timed out waiting for {path}, last={last!r}")
 
 
-def test_local_backend_round_trip(local_env: dict[str, Any]) -> None:
-    """Write via the LocalBackend, then verify via the API after backfill ingests the run."""
+def test_local_client_round_trip(local_env: dict[str, Any]) -> None:
+    """Write via the LocalClient, then verify via the API after backfill ingests the run."""
     log_dir = local_env["log_dir"]
     api_tmp_path = local_env["api_tmp_path"]
 
@@ -34,7 +34,7 @@ def test_local_backend_round_trip(local_env: dict[str, Any]) -> None:
     )
     underfit.log({"loss": 0.5}, step=1)
     underfit.log({"loss": 0.4}, step=2)
-    run.backend.log_lines(["hello", "world"])
+    run.client.log_lines(["hello", "world"])
     underfit.log({"sample": Html("<h1>ok</h1>", caption="hi")}, step=1)
 
     artifact = Artifact("ds", "dataset", metadata={"format": "json"})

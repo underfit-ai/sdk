@@ -1,4 +1,4 @@
-"""Tests for the remote backend."""
+"""Tests for the remote client."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 from unittest.mock import patch
 
 from underfit import Html, Image
-from underfit.backends.remote import RemoteBackend
+from underfit.clients.remote import RemoteClient
 
 API_URL = "https://api.example.com"
 API_KEY = "test-api-key"
@@ -42,32 +42,32 @@ def _mock_urlopen(requests: list[tuple[str, str, Any]], responses: list[dict[str
     return handler
 
 
-def _create_backend(requests: list[tuple[str, str, Any]]) -> RemoteBackend:
+def _create_client(requests: list[tuple[str, str, Any]]) -> RemoteClient:
     init_responses = [{"id": "run-uuid", "name": "server-name", "workerToken": "wt-123"}]
-    with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(requests, init_responses)):
-        backend = RemoteBackend(
+    with patch("underfit.clients.remote.urllib.request.urlopen", side_effect=_mock_urlopen(requests, init_responses)):
+        client = RemoteClient(
             api_url=API_URL, api_key=API_KEY, project="owner/proj", run_name="my-run",
             launch_id="launch-1", run_config={"lr": 0.01}, worker_label="gpu-0",
         )
-    backend._stop.set()  # noqa: SLF001
-    backend._flush_thread.join()  # noqa: SLF001
-    return backend
+    client._stop.set()  # noqa: SLF001
+    client._flush_thread.join()  # noqa: SLF001
+    return client
 
 
 def test_log_lines_advances_start_line() -> None:
     """Send log lines with newline stripping and an incrementing line cursor across flushes."""
     reqs: list[tuple[str, str, Any]] = []
-    backend = _create_backend(reqs)
+    client = _create_client(reqs)
     reqs.clear()
     responses = [
         {"nextStartLine": 2, "status": "buffered"},
         {"nextStartLine": 5, "status": "buffered"},
     ]
-    with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, responses)):
-        backend.log_lines(["hello\n", "world"])
-        backend._flush_logs()  # noqa: SLF001
-        backend.log_lines(["a", "b", "c"])
-        backend._flush_logs()  # noqa: SLF001
+    with patch("underfit.clients.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, responses)):
+        client.log_lines(["hello\n", "world"])
+        client._flush_logs()  # noqa: SLF001
+        client.log_lines(["a", "b", "c"])
+        client._flush_logs()  # noqa: SLF001
     assert reqs[0][2]["startLine"] == 0
     assert reqs[0][2]["lines"][0]["content"] == "hello"
     assert reqs[0][2]["lines"][1]["content"] == "world"
@@ -77,16 +77,16 @@ def test_log_lines_advances_start_line() -> None:
 def test_log_media_uses_specific_part_content_types() -> None:
     """Send media parts with inferred content types instead of octet-stream."""
     reqs: list[tuple[str, str, Any]] = []
-    backend = _create_backend(reqs)
+    client = _create_client(reqs)
     bodies: list[bytes] = []
 
     def handler(req: Any, **_: Any) -> _MockResponse:
         bodies.append(req.data)
         return _MockResponse({})
 
-    with patch("underfit.backends.remote.urllib.request.urlopen", side_effect=handler):
-        backend.log_media("sample", 1, [Image(b"img", file_type="png")])
-        backend.log_media("sample", 1, [Html("<h1>ok</h1>")])
+    with patch("underfit.clients.remote.urllib.request.urlopen", side_effect=handler):
+        client.log_media("sample", 1, [Image(b"img", file_type="png")])
+        client.log_media("sample", 1, [Html("<h1>ok</h1>")])
 
     assert b"Content-Type: image/png" in bodies[0]
     assert b"Content-Type: text/html" in bodies[1]
@@ -95,15 +95,15 @@ def test_log_media_uses_specific_part_content_types() -> None:
 def test_finish_flushes_scalar_buffer_and_updates_terminal_state() -> None:
     """Flush queued scalars before reporting terminal state."""
     reqs: list[tuple[str, str, Any]] = []
-    backend = _create_backend(reqs)
+    client = _create_client(reqs)
     reqs.clear()
 
     with patch(
-        "underfit.backends.remote.urllib.request.urlopen",
+        "underfit.clients.remote.urllib.request.urlopen",
         side_effect=_mock_urlopen(reqs, [{"nextStartLine": 1}, {}, {}]),
     ):
-        backend.log_scalars({"loss": 0.5}, step=3)
-        backend.finish("failed")
+        client.log_scalars({"loss": 0.5}, step=3)
+        client.finish("failed")
 
     assert reqs[0][2]["startLine"] == 0
     assert reqs[0][2]["scalars"][0]["step"] == 3

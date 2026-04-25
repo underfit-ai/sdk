@@ -14,7 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from underfit.artifact import Artifact
-from underfit.backends import Backend, LocalBackend, RemoteBackend, TerminalState
+from underfit.clients import Client, LocalClient, RemoteClient, TerminalState
 from underfit.lib.terminal import capture
 from underfit.media import Audio, Html, Image, Video
 from underfit.run import PathFilter, PathLike, PathOrBytes, Run
@@ -48,7 +48,7 @@ def _generate_run_name() -> str:
 
 
 @contextmanager
-def _capture_output(backend: Backend) -> Iterator[None]:
+def _capture_output(client: Client) -> Iterator[None]:
     pending = {"stdout": "", "stderr": ""}
 
     def write(stream: str, data: str) -> None:
@@ -56,12 +56,12 @@ def _capture_output(backend: Backend) -> Iterator[None]:
         lines = pending[stream].split("\n")
         pending[stream] = lines.pop()
         if lines:
-            backend.log_lines(lines)
+            client.log_lines(lines)
 
     with capture(write):
         yield
     if tail := [line for line in pending.values() if line]:
-        backend.log_lines(tail)
+        client.log_lines(tail)
 
 
 def init(
@@ -82,7 +82,7 @@ def init(
         name: Optional run name. When omitted a random name is generated.
         config: Run configuration dictionary.
         log_dir: Directory for local run logs. Defaults to ``./underfit``.
-        remote_url: Base URL for the self-hosted Underfit backend API.
+        remote_url: Base URL for the self-hosted Underfit API.
         launch_id: Shared launch identifier for multi-worker runs. When
             omitted a unique ID is generated for a single-worker run.
         worker_label: Label identifying this worker within the run. Defaults
@@ -97,7 +97,7 @@ def init(
     resolved_worker_label = worker_label or _default_worker_label()
     if remote_url is None:
         root_dir = log_dir or Path(os.environ.get("UNDERFIT_LOG_DIR", "./underfit"))
-        backend = LocalBackend(
+        client = LocalClient(
             project_name=project,
             run_name=resolved_name,
             run_config=resolved_config,
@@ -107,7 +107,7 @@ def init(
     else:
         if not (api_key := os.environ.get("UNDERFIT_API_KEY")):
             raise RuntimeError("UNDERFIT_API_KEY is required when initializing with a remote URL")
-        backend = RemoteBackend(
+        client = RemoteClient(
             api_url=remote_url,
             api_key=api_key,
             project=project,
@@ -117,8 +117,8 @@ def init(
             worker_label=resolved_worker_label,
         )
 
-    run = Run(project=project, name=backend.run_name, backend=backend, config=resolved_config, on_finish=finish)
-    _capture_context = _capture_output(backend)
+    run = Run(project=project, name=client.run_name, client=client, config=resolved_config, on_finish=finish)
+    _capture_context = _capture_output(client)
     _capture_context.__enter__()
     return run
 

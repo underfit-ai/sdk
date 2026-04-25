@@ -1,4 +1,4 @@
-"""End-to-end test: SDK RemoteBackend → API → API read endpoints."""
+"""End-to-end test: SDK RemoteClient → API → API read endpoints."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from tests.e2e.conftest import flatten_scalar_series
 from underfit import Artifact, Html
 
 
-def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
+def test_remote_client_round_trip(remote_env: dict[str, Any]) -> None:
     """Log scalars, lines, media, and an artifact via the SDK and verify them through the API."""
     client = remote_env["client"]
     handle = remote_env["handle"]
@@ -24,7 +24,7 @@ def test_remote_backend_round_trip(remote_env: dict[str, Any]) -> None:
     )
     underfit.log({"loss": 0.5, "accuracy": 0.9}, step=1)
     underfit.log({"loss": 0.4, "accuracy": 0.92}, step=2)
-    run.backend.log_lines(["hello", "world"])
+    run.client.log_lines(["hello", "world"])
     underfit.log({"sample": Html("<h1>ok</h1>", caption="hi")}, step=1)
     artifact = Artifact("bundle", "dataset", metadata={"format": "json", "tag": "best"}, step=7)
     artifact.add_file(local_file)
