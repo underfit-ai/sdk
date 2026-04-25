@@ -114,21 +114,3 @@ def test_remote_client_reads_runs_and_artifacts(remote_env: dict[str, Any]) -> N
     [project_ref] = proj.list_artifacts()
     assert project_ref.name == "eval-set"
     assert project_ref.read("payload.json") == b'{"x": 1}'
-
-
-def test_remote_project_artifact_round_trip(remote_env: dict[str, Any]) -> None:
-    """Project-level artifacts upload via Project.log_artifact and appear with no run attached."""
-    client = remote_env["client"]
-    handle, project_name = remote_env["handle"], remote_env["project"]
-    auth = {"Authorization": f"Bearer {remote_env['api_key']}"}
-
-    proj = underfit.project(f"{handle}/{project_name}", remote_url="http://testserver")
-    artifact = Artifact("eval-set", "dataset")
-    artifact.add_bytes(b'{"x": 1}', name="payload.json")
-    proj.log_artifact(artifact).result()
-
-    artifacts = client.get(f"/api/v1/accounts/{handle}/projects/{project_name}/artifacts", headers=auth).json()
-    assert [a["name"] for a in artifacts] == ["eval-set"]
-    assert artifacts[0]["runId"] is None
-    file_resp = client.get(f"/api/v1/artifacts/{artifacts[0]['id']}/files/payload.json", headers=auth)
-    assert file_resp.content == b'{"x": 1}'

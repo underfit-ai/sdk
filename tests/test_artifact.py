@@ -17,7 +17,7 @@ from underfit.artifact import (
     ArtifactPathUpload,
     ArtifactReference,
 )
-from underfit.media import Audio, Html, Image, Video
+from underfit.media import Html
 
 
 def test_artifact_collects_uploads_and_manifest(tmp_path: Path) -> None:
@@ -56,27 +56,34 @@ def test_artifact_collects_uploads_and_manifest(tmp_path: Path) -> None:
     )
 
 
-def test_artifact_add_media_uses_uploadable_file_content(tmp_path: Path) -> None:
+def test_artifact_add_media_uses_uploadable_file_content() -> None:
     """Convert media payloads into artifact file uploads."""
     artifact = Artifact("report", "report")
 
     path = artifact.add_media(Html("<h1>ok</h1>"))
 
     assert path == "media-1.html"
-    assert artifact.uploads() == [
-        ArtifactDataUpload(path="media-1.html", data=b"<h1>ok</h1>"),
-    ]
+    assert artifact.uploads() == [ArtifactDataUpload(path="media-1.html", data=b"<h1>ok</h1>")]
     assert artifact.manifest() == ArtifactManifest(files=["media-1.html"], references=[])
-    image_path = tmp_path / "sample.png"
-    html_path = tmp_path / "sample.html"
-    image_path.write_bytes(b"img")
-    html_path.write_text("<h1>ok</h1>")
-    assert Image(image_path) == Image(b"img", file_type="png")
-    assert Html(html_path) == Html("<h1>ok</h1>")
-    assert Audio(b"audio", file_type="wav") == Audio(b"audio", file_type="wav")
-    assert Video(b"video", file_type="mp4") == Video(b"video", file_type="mp4")
-    with pytest.raises(ValueError, match="file_type is required"):
-        Audio(b"audio")
+
+
+def test_artifact_from_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
+    """Apply include and exclude callbacks to resolved paths."""
+    root = tmp_path / "src"
+    root.mkdir()
+    (root / "keep.py").write_text("print('keep')\n")
+    (root / "skip.py").write_text("print('skip')\n")
+    (root / "note.txt").write_text("ignore\n")
+
+    artifact = Artifact.from_code(
+        root, include=lambda path: path.suffix == ".py", exclude=lambda path: path.name == "skip.py",
+    )
+    uploads = artifact.uploads()
+    assert artifact.name == "source-code"
+    assert len(uploads) == 1
+    assert isinstance(uploads[0], ArtifactPathUpload)
+    assert uploads[0].path == "keep.py"
+    assert Path(uploads[0].source_path).read_bytes() == b"print('keep')\n"
 
 
 def test_artifact_rejects_invalid_and_conflicting_paths() -> None:

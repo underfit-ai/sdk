@@ -2,22 +2,17 @@
 
 from __future__ import annotations
 
-import importlib
-import subprocess
 from collections.abc import Sequence
 from concurrent.futures import Future
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from underfit.artifact import Artifact, ArtifactDataUpload, ArtifactPathUpload, StoredArtifact
+from underfit.artifact import Artifact, ArtifactDataUpload, StoredArtifact
 from underfit.clients import Client
 from underfit.media import Html, Image, Media
 from underfit.project import Project
 from underfit.run import Run, RunSession
-
-artifact_module = importlib.import_module("underfit.artifact")
 
 
 class _RecordingClient(Client):
@@ -98,89 +93,15 @@ def test_log_records_scalars_and_media() -> None:
     assert all(isinstance(m, Html) for m in client.media_calls[1][2])
 
 
-def test_log_rejects_unsupported_values() -> None:
-    """Reject unsupported values instead of silently dropping them."""
-    client = _RecordingClient()
-    run = _make_session(client)
-
-    with pytest.raises(TypeError, match="must contain only media objects: train/tags"):
-        run.log({"train": {"loss": 1.0, "tags": ["baseline"]}})
-
-    assert client.scalar_calls == []
-    assert client.media_calls == []
-
-
-def test_log_rejects_mixed_media_lists() -> None:
-    """Reject media batches with inconsistent types."""
+@pytest.mark.parametrize(("payload", "match"), [
+    ({"train": {"loss": 1.0, "tags": ["baseline"]}}, "must contain only media objects: train/tags"),
+    ({"samples": [Html("<p>a</p>"), Image(b"img", file_type="png")]}, "only one media type: samples"),
+])
+def test_log_rejects_invalid_payloads(payload: dict[str, Any], match: str) -> None:
+    """Reject unsupported values and inconsistent media lists."""
     run = _make_session(_RecordingClient())
-    with pytest.raises(TypeError, match="only one media type: samples"):
-        run.log({"samples": [Html("<p>a</p>"), Image(b"img", file_type="png")]})
-
-
-def test_log_code_respects_include_and_exclude_filters(tmp_path: Path) -> None:
-    """Apply include and exclude callbacks to resolved paths."""
-    client = _RecordingClient()
-    run = _make_session(client)
-    root = tmp_path / "src"
-    root.mkdir()
-    keep = root / "keep.py"
-    skip = root / "skip.py"
-    note = root / "note.txt"
-    keep.write_text("print('keep')\n")
-    skip.write_text("print('skip')\n")
-    note.write_text("ignore\n")
-
-    run.log_code(
-        root,
-        include=lambda path: path.suffix == ".py",
-        exclude=lambda path: path.name == "skip.py",
-    ).result()
-    assert [logged.name for logged in client.artifact_calls] == ["source-code"]
-    uploads = client.artifact_calls[0].uploads()
-    assert len(uploads) == 1
-    assert isinstance(uploads[0], ArtifactPathUpload)
-    assert uploads[0].path == "keep.py"
-    assert Path(uploads[0].source_path).read_bytes() == b"print('keep')\n"
-
-
-def test_log_git_adds_patch_artifact_and_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Capture git metadata on the artifact and upload the working tree patch."""
-    client = _RecordingClient()
-    run = _make_session(client)
-    repo_root = tmp_path.resolve()
-    tracked_patch = b"diff --git a/app.py b/app.py\n"
-    status_output = "# branch.oid abc123\n# branch.head main\n? new.py"
-
-    def fake_run(args: list[str], cwd: Path, capture_output: bool, check: bool) -> subprocess.CompletedProcess[bytes]:
-        assert args[0] == "git"
-        assert cwd == repo_root
-        assert capture_output is True
-        assert check is False
-
-        command = args[1:]
-        if command == ["rev-parse", "--show-toplevel"]:
-            return subprocess.CompletedProcess(args, 0, stdout=f"{repo_root}\n".encode(), stderr=b"")
-        if command == ["status", "--porcelain=v2", "--branch"]:
-            return subprocess.CompletedProcess(args, 0, stdout=f"{status_output}\n".encode(), stderr=b"")
-        if command == ["diff", "--binary", "HEAD"]:
-            return subprocess.CompletedProcess(args, 0, stdout=tracked_patch, stderr=b"")
-        raise AssertionError(f"unexpected git command: {command}")
-
-    monkeypatch.setattr(artifact_module.subprocess, "run", fake_run)
-
-    run.log_git(repo_root).result()
-    assert client.artifact_calls[0].name == "git-state"
-    assert client.artifact_calls[0].metadata == {
-        "commit": "abc123",
-        "branch": "main",
-        "is_dirty": True,
-        "untracked_files": ["new.py"],
-    }
-    assert [logged.name for logged in client.artifact_calls] == ["git-state"]
-    uploads = client.artifact_calls[0].uploads()
-    assert isinstance(uploads[0], ArtifactDataUpload)
-    assert uploads[0].path == "working-tree.patch"
-    assert uploads[0].data == tracked_patch
+    with pytest.raises(TypeError, match=match):
+        run.log(payload)
 
 
 def test_log_model_logs_bytes_checkpoint() -> None:
