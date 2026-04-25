@@ -106,6 +106,11 @@ def test_remote_client_reads_runs_and_artifacts(remote_env: dict[str, Any]) -> N
     assert run_artifact.name == "ckpt"
     assert run_artifact.read("model.bin") == b"weights"
 
+    appended = Artifact("post-hoc", "report")
+    appended.add_bytes(b"summary", name="summary.txt")
+    run_ref.log_artifact(appended).result()
+    assert sorted(a.name for a in run_ref.list_artifacts()) == ["ckpt", "post-hoc"]
+
     [project_ref] = proj.list_artifacts()
     assert project_ref.name == "eval-set"
     assert project_ref.read("payload.json") == b'{"x": 1}'

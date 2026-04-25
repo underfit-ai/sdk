@@ -77,6 +77,11 @@ def test_local_client_reads_back_runs_and_artifacts(tmp_path: Path) -> None:
     assert run_ref.name == "ckpt" and run_ref.files == ["model.bin"]
     assert run_ref.read("model.bin") == b"weights"
 
+    appended = Artifact("post-hoc", "report")
+    appended.add_bytes(b"summary", name="summary.txt")
+    run.log_artifact(appended).result()
+    assert sorted(a.name for a in run.list_artifacts()) == ["ckpt", "post-hoc"]
+
     [project_ref] = reader.project.list_artifacts()
     project_ref.download(tmp_path / "out")
     assert (tmp_path / "out" / "payload.json").read_bytes() == b'{"x": 1}'

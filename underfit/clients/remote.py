@@ -145,6 +145,11 @@ class RemoteClient:
         url = f"{self._api_url}/accounts/{project.handle}/projects/{project.name}/artifacts"
         return self._upload_pool.submit(self._upload_artifact, url, artifact)
 
+    def log_run_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
+        """Store an artifact under a previously created run."""
+        base = f"{self._api_url}/accounts/{run.project.handle}/projects/{run.project.name}"
+        return self._upload_pool.submit(self._upload_artifact, f"{base}/runs/{run.name}/artifacts", artifact)
+
     def list_runs(self, project: Project) -> list[Run]:
         """Return the runs stored under a project."""
         url = f"{self._api_url}/accounts/{project.handle}/projects/{project.name}/runs"

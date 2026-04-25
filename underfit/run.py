@@ -33,6 +33,10 @@ class Run:
         """Return artifacts attached to this run."""
         return self.project.client.list_artifacts(self.project, self)
 
+    def log_artifact(self, artifact: Artifact) -> Future[None]:
+        """Append an artifact to this run."""
+        return self.project.client.log_run_artifact(self, artifact)
+
 PathLike = Union[str, Path]
 PathOrBytes = Union[str, Path, bytes, bytearray, memoryview]
 PathFilter = Callable[[Path], bool]

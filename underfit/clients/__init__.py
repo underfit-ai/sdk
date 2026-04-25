@@ -40,6 +40,9 @@ class Client(Protocol):
     def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
         """Store an artifact directly under a project."""
 
+    def log_run_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
+        """Store an artifact under a previously created run."""
+
     def list_runs(self, project: Project) -> list[Run]:
         """Return the runs stored under a project."""
 

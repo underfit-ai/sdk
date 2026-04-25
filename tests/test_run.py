@@ -50,6 +50,10 @@ class _RecordingClient(Client):
         _ = project
         return self.log_artifact(artifact)
 
+    def log_run_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
+        _ = run
+        return self.log_artifact(artifact)
+
     def list_runs(self, project: Project) -> list[Run]:
         _ = project
         return []

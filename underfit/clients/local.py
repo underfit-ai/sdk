@@ -98,6 +98,10 @@ class LocalClient:
         """Store an artifact directly under a project."""
         return self._write_artifact(self._root_dir / "projects" / project.name / "artifacts", artifact)
 
+    def log_run_artifact(self, run: Run, artifact: Artifact) -> Future[None]:
+        """Store an artifact under a previously created run."""
+        return self._write_artifact(self._root_dir / run.id / "artifacts", artifact)
+
     def list_runs(self, project: Project) -> list[Run]:
         """Return the runs stored under a project."""
         return [run for _, run in self._iter_runs(project)]
