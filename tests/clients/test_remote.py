@@ -6,7 +6,7 @@ import json
 from typing import Any
 from unittest.mock import patch
 
-from underfit import Html, Image
+from underfit import Artifact, Html, Image
 from underfit.clients.remote import RemoteClient
 
 API_URL = "https://api.example.com"
@@ -43,12 +43,10 @@ def _mock_urlopen(requests: list[tuple[str, str, Any]], responses: list[dict[str
 
 
 def _create_client(requests: list[tuple[str, str, Any]]) -> RemoteClient:
-    init_responses = [{"id": "run-uuid", "name": "server-name", "workerToken": "wt-123"}]
-    with patch("underfit.clients.remote.urllib.request.urlopen", side_effect=_mock_urlopen(requests, init_responses)):
-        client = RemoteClient(
-            api_url=API_URL, api_key=API_KEY, project="owner/proj", run_name="my-run",
-            launch_id="launch-1", run_config={"lr": 0.01}, worker_label="gpu-0",
-        )
+    launch_response = [{"id": "run-uuid", "name": "server-name", "workerToken": "wt-123"}]
+    with patch("underfit.clients.remote.urllib.request.urlopen", side_effect=_mock_urlopen(requests, launch_response)):
+        client = RemoteClient(api_url=API_URL, api_key=API_KEY, project="owner/proj")
+        client.launch_run(run_name="my-run", launch_id="launch-1", run_config={"lr": 0.01}, worker_label="gpu-0")
     client._stop.set()  # noqa: SLF001
     client._flush_thread.join()  # noqa: SLF001
     return client
@@ -110,3 +108,19 @@ def test_finish_flushes_scalar_buffer_and_updates_terminal_state() -> None:
     assert reqs[0][2]["scalars"][0]["values"] == {"loss": 0.5}
     assert reqs[1] == ("PUT", f"{API_URL}/api/v1/runs/summary", {"summary": {"loss": 0.5}})
     assert reqs[2] == ("PUT", f"{API_URL}/api/v1/runs/terminal-state", {"terminalState": "failed"})
+
+
+def test_log_project_artifact_posts_to_project_endpoint() -> None:
+    """Project-level uploads hit the project artifacts endpoint instead of the run-scoped one."""
+    reqs: list[tuple[str, str, Any]] = []
+    responses = [{"id": "art-1"}, {}]
+    with patch("underfit.clients.remote.urllib.request.urlopen", side_effect=_mock_urlopen(reqs, responses)):
+        client = RemoteClient(api_url=API_URL, api_key=API_KEY, project="owner/proj")
+        artifact = Artifact("eval-set", "dataset")
+        artifact.add_bytes(b"{}", name="payload.json")
+        client.log_project_artifact(client.project, artifact).result()
+        client._upload_pool.shutdown(wait=True)  # noqa: SLF001
+
+    assert reqs[0][:2] == ("POST", f"{API_URL}/api/v1/accounts/owner/projects/proj/artifacts")
+    assert reqs[1] == ("PUT", f"{API_URL}/api/v1/artifacts/art-1/files/payload.json", b"{}")
+    assert reqs[2][:2] == ("POST", f"{API_URL}/api/v1/artifacts/art-1/finalize")

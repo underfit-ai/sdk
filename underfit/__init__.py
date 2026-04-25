@@ -22,7 +22,7 @@ from underfit.run import PathFilter, PathLike, PathOrBytes, RunSession
 
 __all__ = [
     "Artifact", "Audio", "Html", "Image", "Project", "RunSession", "Video",
-    "finish", "init", "log", "log_git", "log_model", "session",
+    "finish", "init", "log", "log_git", "log_model", "project", "session",
 ]
 
 session: RunSession | None = None
@@ -96,32 +96,42 @@ def init(
     resolved_config = dict(config or {})
     resolved_name = name.strip() if name else _generate_run_name()
     resolved_worker_label = worker_label or _default_worker_label()
+    client: Client
     if remote_url is None:
         root_dir = log_dir or Path(os.environ.get("UNDERFIT_LOG_DIR", "./underfit"))
-        client = LocalClient(
-            project_name=project,
-            run_name=resolved_name,
-            run_config=resolved_config,
-            worker_label=resolved_worker_label,
-            root_dir=root_dir.resolve(),
-        )
+        local = LocalClient(project=project, root_dir=root_dir.resolve())
+        local.launch_run(run_name=resolved_name, run_config=resolved_config, worker_label=resolved_worker_label)
+        client = local
     else:
         if not (api_key := os.environ.get("UNDERFIT_API_KEY")):
             raise RuntimeError("UNDERFIT_API_KEY is required when initializing with a remote URL")
-        client = RemoteClient(
-            api_url=remote_url,
-            api_key=api_key,
-            project=project,
-            run_name=resolved_name,
-            launch_id=launch_id or uuid4().hex,
-            run_config=resolved_config,
-            worker_label=resolved_worker_label,
+        remote = RemoteClient(api_url=remote_url, api_key=api_key, project=project)
+        remote.launch_run(
+            run_name=resolved_name, launch_id=launch_id or uuid4().hex,
+            run_config=resolved_config, worker_label=resolved_worker_label,
         )
+        client = remote
 
     session = RunSession(project=client.project, name=client.run_name, config=resolved_config, on_finish=finish)
     _capture_context = _capture_output(client)
     _capture_context.__enter__()
     return session
+
+
+def project(identifier: str, *, remote_url: str | None = None, log_dir: Path | None = None) -> Project:
+    """Return a :class:`Project` for an existing project.
+
+    Args:
+        identifier: ``"<account-handle>/<project-name>"`` or a bare project name.
+        remote_url: Base URL for the self-hosted Underfit API. When omitted, a local client is used.
+        log_dir: Root directory for local project data. Defaults to ``./underfit``.
+    """
+    if remote_url is None:
+        root_dir = log_dir or Path(os.environ.get("UNDERFIT_LOG_DIR", "./underfit"))
+        return LocalClient(project=identifier, root_dir=root_dir.resolve()).project
+    if not (api_key := os.environ.get("UNDERFIT_API_KEY")):
+        raise RuntimeError("UNDERFIT_API_KEY is required when accessing a remote project")
+    return RemoteClient(api_url=remote_url, api_key=api_key, project=identifier).project
 
 
 def log(data: dict[str, Any], step: int | None = None) -> None:

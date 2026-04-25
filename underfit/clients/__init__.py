@@ -32,7 +32,10 @@ class Client(Protocol):
         """Append media files for a run under a shared key and step."""
 
     def log_artifact(self, artifact: Artifact) -> Future[None]:
-        """Store an artifact for a run."""
+        """Store an artifact for the active run."""
+
+    def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
+        """Store an artifact directly under a project."""
 
     def finish(self, terminal_state: TerminalState = "finished") -> None:
         """Finalize a run and flush client state."""

@@ -110,3 +110,23 @@ def test_log_code_round_trip(local_env: dict[str, Any]) -> None:
         source = client.get(f"/api/v1/artifacts/{artifacts[0]['id']}/files/train.py")
         assert source.status_code == 200
         assert source.content == b"print('ok')\n"
+
+
+def test_local_project_artifact_round_trip(local_env: dict[str, Any]) -> None:
+    """Project-level artifacts written locally appear in the project after backfill."""
+    log_dir = local_env["log_dir"]
+    api_tmp_path = local_env["api_tmp_path"]
+
+    proj = underfit.project("vision", log_dir=log_dir)
+    artifact = Artifact("eval-set", "dataset")
+    artifact.add_bytes(b'{"x": 1}', name="payload.json")
+    proj.log_artifact(artifact).result()
+
+    with boot_backfill_client(api_tmp_path, log_dir) as client:
+        artifacts = _wait_for(client, "/api/v1/accounts/local/projects/vision/artifacts", predicate=bool)
+        assert [a["name"] for a in artifacts] == ["eval-set"]
+        assert artifacts[0]["runId"] is None
+        file_resp = client.get(f"/api/v1/artifacts/{artifacts[0]['id']}/files/payload.json")
+        assert file_resp.content == b'{"x": 1}'
+
+

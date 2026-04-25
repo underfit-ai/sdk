@@ -46,6 +46,10 @@ class _RecordingClient(Client):
         future.set_result(None)
         return future
 
+    def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
+        _ = project
+        return self.log_artifact(artifact)
+
     def finish(self, terminal_state: str = "finished") -> None:
         self.finish_calls.append(terminal_state)
 

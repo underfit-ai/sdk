@@ -12,9 +12,8 @@ from underfit.clients.local import LocalClient
 
 def test_local_client_writes_backfill_layout(tmp_path: Path) -> None:
     """Write local run data in the layout consumed by the API backfill service."""
-    client = LocalClient(
-        project_name="Vision", run_name="Trial A", run_config={"lr": 0.01}, worker_label="worker-7", root_dir=tmp_path,
-    )
+    client = LocalClient(project="Vision", root_dir=tmp_path)
+    client.launch_run(run_name="Trial A", run_config={"lr": 0.01}, worker_label="worker-7")
 
     client.log_scalars({"loss": 0.8}, step=1)
     client.log_lines(["hello", "world\n"])
@@ -52,3 +51,16 @@ def test_local_client_writes_backfill_layout(tmp_path: Path) -> None:
 
     media_path = client.run_dir / "media" / "html" / "samples_7_0.html"
     assert media_path.read_text() == "<h1>ok</h1>"
+
+
+def test_local_client_writes_project_artifact_under_project_dir(tmp_path: Path) -> None:
+    """Project-level artifacts land in the layout the API backfill walks for project artifacts."""
+    client = LocalClient(project="Vision", root_dir=tmp_path)
+
+    artifact = Artifact("eval-set", "dataset")
+    artifact.add_bytes(b"{}", name="payload.json")
+    client.log_project_artifact(client.project, artifact).result()
+
+    [artifact_dir] = (tmp_path / "projects" / "Vision" / "artifacts").iterdir()
+    assert (artifact_dir / "files" / "payload.json").read_bytes() == b"{}"
+    assert json.loads((artifact_dir / "artifact.json").read_text())["name"] == "eval-set"

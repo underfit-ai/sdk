@@ -33,31 +33,18 @@ def _multipart_body(metadata: dict[str, Any], files: list[tuple[bytes, str]]) ->
     buf.write(f"--{boundary}--\r\n".encode())
     return buf.getvalue(), f"multipart/form-data; boundary={boundary}"
 
+
 class RemoteClient:
     """Push run data to a remote Underfit API server."""
 
-    def __init__(
-        self,
-        *,
-        api_url: str,
-        api_key: str,
-        project: str,
-        run_name: str,
-        launch_id: str,
-        run_config: dict[str, Any],
-        worker_label: str,
-    ) -> None:
-        """Initialize a remote client.
+    def __init__(self, *, api_url: str, api_key: str, project: str) -> None:
+        """Initialize a remote client and resolve its project.
 
         Args:
             api_url: Base URL for the Underfit API.
             api_key: API key for authentication.
             project: Project identifier as either ``"<account-handle>/<project-name>"`` or a bare
                 ``"<project-name>"``. Bare names resolve to projects owned by the authenticated user.
-            run_name: Run name for the launch request.
-            launch_id: Launch ID grouping workers in a single run.
-            run_config: Run configuration payload.
-            worker_label: Label identifying this worker.
         """
         self._api_url = api_url.rstrip("/") + "/api/v1"
         self._api_key = api_key
@@ -67,6 +54,11 @@ class RemoteClient:
         handle, project_name = project.split("/", 1)
         self.project = Project(handle=handle, name=project_name, client=self)
         self._runs_url = f"{self._api_url}/accounts/{handle}/projects/{project_name}/runs"
+        self._upload_pool = ThreadPoolExecutor(max_workers=4)
+        self._worker_token = ""
+
+    def launch_run(self, *, run_name: str, launch_id: str, run_config: dict[str, Any], worker_label: str) -> None:
+        """Launch a run on the server and start background flush threads."""
         self._log_buffer: list[dict[str, Any]] = []
         self._scalar_buffer: list[dict[str, Any]] = []
         self._next_log_line = 0
@@ -78,7 +70,6 @@ class RemoteClient:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._metrics = SystemMetrics(worker_label)
-        self._upload_pool = ThreadPoolExecutor(max_workers=4)
 
         body: dict[str, Any] = {"runName": run_name, "launchId": launch_id, "workerLabel": worker_label}
         if run_config:
@@ -134,8 +125,13 @@ class RemoteClient:
             resp.read()
 
     def log_artifact(self, artifact: Artifact) -> Future[None]:
-        """Store an artifact for a run."""
-        return self._upload_pool.submit(self._upload_artifact, artifact)
+        """Store an artifact for the active run."""
+        return self._upload_pool.submit(self._upload_artifact, f"{self._runs_url}/{self.run_name}/artifacts", artifact)
+
+    def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
+        """Store an artifact directly under a project."""
+        url = f"{self._api_url}/accounts/{project.handle}/projects/{project.name}/artifacts"
+        return self._upload_pool.submit(self._upload_artifact, url, artifact)
 
     def finish(self, terminal_state: str = "finished") -> None:
         """Finalize a run and flush client state."""
@@ -197,13 +193,13 @@ class RemoteClient:
         self._summary_sent = summary
         return True
 
-    def _upload_artifact(self, artifact: Artifact) -> None:
+    def _upload_artifact(self, create_url: str, artifact: Artifact) -> None:
         body: dict[str, Any] = {"name": artifact.name, "type": artifact.type}
         if artifact.metadata:
             body["metadata"] = artifact.metadata
         if artifact.step is not None:
             body["step"] = artifact.step
-        created = self._request("POST", f"{self._runs_url}/{self.run_name}/artifacts", body, auth="api_key")
+        created = self._request("POST", create_url, body, auth="api_key")
         for upload in artifact.uploads():
             url = f"{self._api_url}/artifacts/{created['id']}/files/{upload.path}"
             if isinstance(upload, ArtifactPathUpload):

@@ -24,32 +24,26 @@ class LocalClient:
 
     _RAW_SCALAR_RESOLUTION = 1
 
-    def __init__(
-        self,
-        *,
-        project_name: str,
-        run_name: str,
-        run_config: dict[str, Any],
-        worker_label: str,
-        root_dir: str | Path | None = None,
-    ) -> None:
-        """Initialize a local filesystem client.
+    def __init__(self, *, project: str, root_dir: str | Path | None = None) -> None:
+        """Initialize a local client and resolve its project.
 
         Args:
-            project_name: Project name for the run.
-            run_name: Run name.
-            run_config: Run configuration payload.
-            worker_label: Label identifying this worker.
-            root_dir: Root directory for local run data.
+            project: Project identifier as either ``"<account-handle>/<project-name>"`` or a bare
+                ``"<project-name>"``. Bare names are stored under the ``local`` handle.
+            root_dir: Root directory for local run and project data.
         """
+        handle, name = project.split("/", 1) if "/" in project else ("local", project)
+        self.project = Project(handle=handle, name=name, client=self)
+        self._root_dir = Path(root_dir or Path.cwd() / "underfit")
+
+    def launch_run(self, *, run_name: str, run_config: dict[str, Any], worker_label: str) -> None:
+        """Create a fresh run directory and start the metrics sampler."""
         self.run_name = run_name
         self._worker_label = worker_label
-        handle, name = project_name.split("/", 1) if "/" in project_name else ("local", project_name)
-        self.project = Project(handle=handle, name=name, client=self)
-        self.run_dir = Path(root_dir or Path.cwd() / "underfit") / str(uuid4())
+        self.run_dir = self._root_dir / str(uuid4())
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self._run_meta: dict[str, Any] = {
-            "project": project_name, "name": self.run_name, "config": run_config, "summary": {},
+            "project": self.project.name, "name": run_name, "config": run_config, "summary": {},
         }
         self._write_run_meta()
         self._metrics = SystemMetrics(worker_label)
@@ -94,8 +88,15 @@ class LocalClient:
             path.write_bytes(payload.data)
 
     def log_artifact(self, artifact: Artifact) -> Future[None]:
-        """Store an artifact for a run."""
-        artifact_dir = self.run_dir / "artifacts" / str(uuid4())
+        """Store an artifact for the active run."""
+        return self._write_artifact(self.run_dir / "artifacts", artifact)
+
+    def log_project_artifact(self, project: Project, artifact: Artifact) -> Future[None]:
+        """Store an artifact directly under a project."""
+        return self._write_artifact(self._root_dir / "projects" / project.name / "artifacts", artifact)
+
+    def _write_artifact(self, parent: Path, artifact: Artifact) -> Future[None]:
+        artifact_dir = parent / str(uuid4())
         files_dir = artifact_dir / "files"
         files_dir.mkdir(parents=True, exist_ok=True)
 
